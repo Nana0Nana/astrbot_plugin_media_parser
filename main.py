@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
-from astrbot.api.message_components import Nodes
+from astrbot.api.message_components import Nodes, Plain, Image, Video
 from astrbot.core.star.filter.event_message_type import EventMessageType
 from .parser_manager import ParserManager
 from .parsers import BilibiliParser, DouyinParser, TwitterParser, KuaishouParser
@@ -18,6 +18,8 @@ class VideoParserPlugin(Star):
         self.is_auto_parse = config.get("is_auto_parse", True)
         self.is_auto_pack = config.get("is_auto_pack", True)
         max_video_size_mb = config.get("max_video_size_mb", 0.0)
+        # 大视频阈值硬编码为100MB（napcat平台限制）
+        self.large_video_threshold_mb = 100.0
         
         parsers = []
         if config.get("enable_bilibili", True):
@@ -94,6 +96,26 @@ class VideoParserPlugin(Star):
         if video_files:
             self._cleanup_files(video_files)
     
+    def _is_pure_image_gallery(self, nodes: list) -> bool:
+        """
+        判断节点列表是否是纯图片图集（只有 Plain 和 Image，没有 Video）
+        
+        Args:
+            nodes: 节点列表
+            
+        Returns:
+            bool: 是否是纯图片图集
+        """
+        has_video = False
+        has_image = False
+        for node in nodes:
+            if isinstance(node, Video):
+                has_video = True
+                break
+            elif isinstance(node, Image):
+                has_image = True
+        return has_image and not has_video
+    
     @filter.event_message_type(EventMessageType.ALL)
     async def auto_parse(self, event: AstrMessageEvent):
         """自动解析消息中的视频链接"""
@@ -112,17 +134,101 @@ class VideoParserPlugin(Star):
         if result is None:
             return
         
-        nodes, temp_files, video_files = result
+        normal_link_nodes, large_video_link_nodes, temp_files, video_files, normal_link_count = result
         
         try:
-            if self.is_auto_pack:
-                await event.send(event.chain_result([Nodes(nodes)]))
-            else:
-                for node in nodes:
-                    await event.send(event.chain_result([node]))
+            # 获取发送者信息
+            from astrbot.api.message_components import Node
+            sender_name = "视频解析bot"
+            platform = event.get_platform_name()
+            sender_id = event.get_self_id()
+            if platform not in ("wechatpadpro", "webchat", "gewechat"):
+                try:
+                    sender_id = int(sender_id)
+                except (ValueError, TypeError):
+                    sender_id = 10000
+            
+            # 分隔线常量
+            separator = "-------------------------------------"
+            
+            # 先发送普通节点（没有大视频的链接）
+            if normal_link_nodes:
+                if self.is_auto_pack:
+                    # 自动打包：扁平化所有节点放在一个转发消息集合（Nodes）中
+                    flat_nodes = []
+                    for link_idx, link_nodes in enumerate(normal_link_nodes):
+                        # 检查是否是纯图片图集
+                        if self._is_pure_image_gallery(link_nodes):
+                            # 纯图片图集：文本单独 Node，所有 Image 放在一个 Node 的 content 中
+                            texts = [node for node in link_nodes if isinstance(node, Plain)]
+                            images = [node for node in link_nodes if isinstance(node, Image)]
+                            
+                            # 文本节点
+                            for text in texts:
+                                flat_nodes.append(Node(name=sender_name, uin=sender_id, content=[text]))
+                            
+                            # 所有图片放在一个 Node 的 content 中
+                            if images:
+                                flat_nodes.append(Node(name=sender_name, uin=sender_id, content=images))
+                        else:
+                            # 视频图集混合或纯视频：全部单独发送（每个节点一个 Node）
+                            for node in link_nodes:
+                                if node is not None:
+                                    flat_nodes.append(Node(name=sender_name, uin=sender_id, content=[node]))
+                        
+                        # 如果不是最后一个链接，添加分隔线
+                        if link_idx < len(normal_link_nodes) - 1:
+                            flat_nodes.append(Node(name=sender_name, uin=sender_id, content=[Plain(separator)]))
+                    
+                    if flat_nodes:
+                        # 所有节点扁平化放在一个转发消息集合中
+                        await event.send(event.chain_result([Nodes(flat_nodes)]))
+                else:
+                    # 不自动打包：不使用转发消息集合，直接发送每个节点
+                    for link_idx, link_nodes in enumerate(normal_link_nodes):
+                        # 检查是否是纯图片图集
+                        if self._is_pure_image_gallery(link_nodes):
+                            # 纯图片图集：文本单独发送，所有 Image 放在一个 chain_result 中
+                            texts = [node for node in link_nodes if isinstance(node, Plain)]
+                            images = [node for node in link_nodes if isinstance(node, Image)]
+                            
+                            # 先发送文本
+                            for text in texts:
+                                await event.send(event.chain_result([text]))
+                            
+                            # 所有图片放在一个 chain_result 中发送
+                            if images:
+                                await event.send(event.chain_result(images))
+                        else:
+                            # 视频图集混合或纯视频：全部单独发送
+                            for node in link_nodes:
+                                if node is not None:
+                                    await event.send(event.chain_result([node]))
+                        
+                        # 如果不是最后一个链接，发送分隔线
+                        if link_idx < len(normal_link_nodes) - 1:
+                            await event.send(event.plain_result(separator))
+            
+            # 然后发送大视频节点（有大视频的链接的所有节点，都单独发送）
+            if large_video_link_nodes:
+                # 如果开启了自动打包，在发送大视频前发送提示消息
+                if self.is_auto_pack:
+                    # 发送醒目的提示消息
+                    threshold_mb = int(self.large_video_threshold_mb) if self.large_video_threshold_mb > 0 else 100
+                    notice_text = f"⚠️ 链接中包含超过{threshold_mb}MB的视频时将单独发送所有媒体"
+                    await event.send(event.plain_result(notice_text))
+                
+                # 大视频链接：全部单独发送，使用分隔线分割不同链接
+                for link_idx, link_nodes in enumerate(large_video_link_nodes):
+                    for node in link_nodes:
+                        if node is not None:
+                            await event.send(event.chain_result([node]))
+                    
+                    # 如果不是最后一个链接，发送分隔线
+                    if link_idx < len(large_video_link_nodes) - 1:
+                        await event.send(event.plain_result(separator))
             
             self._cleanup_all_files(temp_files, video_files)
         except Exception:
             self._cleanup_all_files(temp_files, video_files)
             raise
-

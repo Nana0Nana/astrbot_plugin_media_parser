@@ -16,12 +16,14 @@ class TwitterParser(BaseVideoParser):
         初始化 Twitter 解析器
         
         Args:
-            max_video_size_mb: 最大允许的视频大小(MB)，0表示不限制
+            max_video_size_mb: 最大允许的视频大小(MB)，超过此大小的视频将被跳过，0表示不限制
             use_proxy: 是否使用代理
             proxy_url: 代理地址（格式：http://host:port 或 socks5://host:port）
             cache_dir: 视频文件缓存目录
         """
         super().__init__("Twitter/X", max_video_size_mb)
+        # 大视频阈值硬编码为100MB（napcat平台限制）
+        self.large_video_threshold_mb = 100.0
         self.use_proxy = use_proxy
         self.proxy_url = proxy_url
         self.cache_dir = cache_dir
@@ -200,13 +202,28 @@ class TwitterParser(BaseVideoParser):
                 
                 # 处理视频（下载到缓存目录）
                 video_files = []
+                has_large_video = False
                 if media_info.get('videos'):
                     for idx, video_info in enumerate(media_info['videos']):
                         video_url = video_info.get('url')
                         if video_url:
                             # 检查视频大小
-                            if not await self.check_video_size(video_url, session):
-                                continue  # 视频过大，跳过
+                            video_size = await self.get_video_size(video_url, session)
+                            
+                            # 首先检查是否超过最大允许大小（max_video_size_mb）
+                            # 如果超过，跳过该视频，不下载
+                            if self.max_video_size_mb > 0 and video_size is not None:
+                                if video_size > self.max_video_size_mb:
+                                    continue  # 超过最大允许大小，跳过该视频
+                            
+                            # 检查是否超过大视频阈值（100MB，硬编码）
+                            # 如果视频大小超过100MB但不超过max_video_size_mb，将单独发送
+                            exceeds_large_threshold = False
+                            if video_size is not None and video_size > self.large_video_threshold_mb:
+                                # 如果设置了max_video_size_mb，确保不超过最大允许大小
+                                if self.max_video_size_mb <= 0 or video_size <= self.max_video_size_mb:
+                                    exceeds_large_threshold = True
+                                    has_large_video = True
                             
                             # 下载视频到缓存目录
                             video_file = await self._download_media_to_file(session, video_url, tweet_id, idx, is_video=True)
@@ -214,7 +231,9 @@ class TwitterParser(BaseVideoParser):
                                 video_files.append({
                                     'file_path': video_file,
                                     'thumbnail': video_info.get('thumbnail', ''),
-                                    'duration': video_info.get('duration', 0)
+                                    'duration': video_info.get('duration', 0),
+                                    'exceeds_large_threshold': exceeds_large_threshold,
+                                    'file_size_mb': video_size  # 保存视频大小信息（MB）
                                 })
                 
                 # 处理图片（仍然使用临时文件）
@@ -237,13 +256,21 @@ class TwitterParser(BaseVideoParser):
                     "desc": media_info.get('text', ''),
                 }
                 
+                # 同时保存视频和图片（如果存在）
                 if video_files:
                     result['video_files'] = video_files
                     result['is_twitter_video'] = True
-                elif image_files:
+                    result['has_large_video'] = has_large_video  # 标记是否有超过大视频阈值的视频
+                    # 如果有大视频，提前设置force_separate_send，以便parser_manager正确处理
+                    if has_large_video:
+                        result['force_separate_send'] = True
+                
+                if image_files:
                     result['image_files'] = image_files
                     result['is_twitter_images'] = True
-                    result['is_gallery'] = len(image_files) > 1
+                    # 如果有多个图片，标记为图集
+                    if len(image_files) > 1:
+                        result['is_gallery'] = True
                 
                 return result
                 
@@ -253,21 +280,34 @@ class TwitterParser(BaseVideoParser):
     def build_media_nodes(self, result: Dict[str, Any], sender_name: str, sender_id: Any, is_auto_pack: bool) -> List:
         """
         构建媒体节点（视频或图片）
-        重写基类方法以支持从文件系统加载 Twitter 媒体
+        重构后：
+        - 纯图片图集：返回 Image 对象列表（扁平化）
+        - 视频图集混合：全部单独发送（返回 Video 和 Image 对象列表，扁平化）
         
         Args:
             result: 解析结果
             sender_name: 发送者名称
             sender_id: 发送者ID
-            is_auto_pack: 是否打包为Node
+            is_auto_pack: 是否打包为Node（已废弃，统一扁平化返回）
             
         Returns:
-            List: 媒体节点列表
+            List: 媒体节点列表（Image 或 Video 对象）
         """
+        from astrbot.api.message_components import Image, Video
+        
+        has_video = result.get('is_twitter_video') and result.get('video_files')
+        has_images = result.get('is_twitter_images') and result.get('image_files')
+        has_large_video = result.get('has_large_video', False)
+        
+        # 如果既没有视频也没有图片，回退到基类方法
+        if not has_video and not has_images:
+            return super().build_media_nodes(result, sender_name, sender_id, is_auto_pack)
+        
         nodes = []
         
-        # 处理推特视频（从文件）
-        if result.get('is_twitter_video') and result.get('video_files'):
+        # 如果有视频（无论是否超过阈值），视频图集混合结果全部单独发送
+        if has_video:
+            # 所有视频单独发送
             for video_file_info in result['video_files']:
                 file_path = video_file_info.get('file_path')
                 if file_path:
@@ -275,23 +315,30 @@ class TwitterParser(BaseVideoParser):
                         file_path,
                         sender_name,
                         sender_id,
-                        is_auto_pack
+                        False  # 不打包，直接返回 Video 对象
                     )
                     if video_node:
                         nodes.append(video_node)
-        
-        # 处理推特图片（从文件）
-        elif result.get('is_twitter_images') and result.get('image_files'):
-            gallery_nodes = self._build_gallery_nodes_from_files(
-                result['image_files'],
-                sender_name,
-                sender_id,
-                is_auto_pack
-            )
-            nodes.extend(gallery_nodes)
-        
-        # 如果不是推特特定内容，回退到基类方法
-        elif not result.get('is_twitter_video') and not result.get('is_twitter_images'):
-            return super().build_media_nodes(result, sender_name, sender_id, is_auto_pack)
+            
+            # 如果有图片，也单独发送
+            if has_images:
+                for image_path in result['image_files']:
+                    if image_path:
+                        image_path = os.path.normpath(image_path)
+                        if os.path.exists(image_path):
+                            try:
+                                nodes.append(Image.fromFileSystem(image_path))
+                            except Exception:
+                                pass
+        elif has_images:
+            # 纯图片图集：返回 Image 对象列表（扁平化）
+            for image_path in result['image_files']:
+                if image_path:
+                    image_path = os.path.normpath(image_path)
+                    if os.path.exists(image_path):
+                        try:
+                            nodes.append(Image.fromFileSystem(image_path))
+                        except Exception:
+                            pass
         
         return nodes

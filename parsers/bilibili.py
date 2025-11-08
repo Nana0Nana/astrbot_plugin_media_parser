@@ -528,18 +528,38 @@ class BilibiliParser(BaseVideoParser):
             return None
 
         # 检查视频大小
-        if not await self.check_video_size(direct_url, session):
-            return None  # 视频过大，跳过
+        video_size = await self.get_video_size(direct_url, session)
+        
+        # 首先检查是否超过最大允许大小（max_video_size_mb）
+        # 如果超过，跳过该视频，不下载
+        if self.max_video_size_mb > 0 and video_size is not None:
+            if video_size > self.max_video_size_mb:
+                return None  # 超过最大允许大小，跳过该视频
+        
+        # 检查是否超过大视频阈值（100MB，硬编码）
+        # 如果视频大小超过100MB但不超过max_video_size_mb，将单独发送
+        has_large_video = False
+        if video_size is not None and video_size > 100.0:
+            # 如果设置了max_video_size_mb，确保不超过最大允许大小
+            if self.max_video_size_mb <= 0 or video_size <= self.max_video_size_mb:
+                has_large_video = True
 
         is_b23_short = urlparse(original_url).netloc.lower() == B23_HOST
         display_url = original_url if is_b23_short else page_url
         
-        return {
+        result = {
             "video_url": display_url,
             "author": info["author"],
             "title": info["title"],
             "desc": info["desc"],
-            "direct_url": direct_url
+            "direct_url": direct_url,
+            "file_size_mb": video_size  # 保存视频大小信息（MB）
         }
+        
+        if has_large_video:
+            result['has_large_video'] = True
+            result['force_separate_send'] = True
+        
+        return result
 
 

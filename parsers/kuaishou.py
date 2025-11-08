@@ -334,16 +334,38 @@ class KuaishouParser(BaseVideoParser):
                 
                 video_url = self._parse_video(html)
                 if video_url:
-                    if not await self.check_video_size(video_url, session):
-                        return None
+                    # 检查视频大小
+                    video_size = await self.get_video_size(video_url, session)
+                    
+                    # 首先检查是否超过最大允许大小（max_video_size_mb）
+                    # 如果超过，跳过该视频，不下载
+                    if self.max_video_size_mb > 0 and video_size is not None:
+                        if video_size > self.max_video_size_mb:
+                            return None  # 超过最大允许大小，跳过该视频
+                    
+                    # 检查是否超过大视频阈值（100MB，硬编码）
+                    # 如果视频大小超过100MB但不超过max_video_size_mb，将单独发送
+                    has_large_video = False
+                    if video_size is not None and video_size > 100.0:
+                        # 如果设置了max_video_size_mb，确保不超过最大允许大小
+                        if self.max_video_size_mb <= 0 or video_size <= self.max_video_size_mb:
+                            has_large_video = True
+                    
                     upload_time = self._extract_upload_time(video_url)
-                    return {
+                    parse_result = {
                         "video_url": url,
                         "title": title,
                         "author": author,
                         "timestamp": upload_time or "",
-                        "direct_url": video_url
+                        "direct_url": video_url,
+                        "file_size_mb": video_size  # 保存视频大小信息（MB）
                     }
+                    
+                    if has_large_video:
+                        parse_result['has_large_video'] = True
+                        parse_result['force_separate_send'] = True
+                    
+                    return parse_result
                 
                 album = self._parse_album(html)
                 if album:

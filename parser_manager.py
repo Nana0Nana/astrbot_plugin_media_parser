@@ -143,7 +143,9 @@ class ParserManager:
             is_auto_pack: 是否打包为Node
             
         Returns:
-            (节点列表, 临时文件路径列表, 视频文件路径列表) 元组，如果没有可解析的链接则返回None
+            (普通链接节点列表, 大视频链接节点列表, 临时文件路径列表, 视频文件路径列表, 链接数量) 元组，如果没有可解析的链接则返回None
+            普通链接节点列表：每个元素是一个链接的节点列表（没有大视频的链接），可以打包发送
+            大视频链接节点列表：每个元素是一个链接的节点列表（有大视频的链接），需要单独发送
         """
         try:
             input_text = event.message_str
@@ -153,7 +155,9 @@ class ParserManager:
             
             unique_links = self._deduplicate_links(links_with_parser)
             
-            nodes = []
+            normal_link_nodes = []  # 普通链接节点列表，每个元素是一个链接的节点列表
+            large_video_link_nodes = []  # 大视频链接节点列表，每个元素是一个链接的节点列表
+            normal_link_count = 0  # 普通链接数量（用于决定节点组装方式）
             temp_files = []
             video_files = []
             sender_name = "视频解析bot"
@@ -174,19 +178,16 @@ class ParserManager:
                 for (url, parser_instance), result in zip(url_parser_pairs, results):
                     # 处理异常结果或None结果（解析失败）
                     if isinstance(result, Exception) or not result:
-                        # 解析失败，添加失败节点
-                        from astrbot.api.message_components import Plain, Node
+                        # 解析失败，创建一个链接的节点列表（扁平化结构）
+                        from astrbot.api.message_components import Plain
                         failure_text = f"解析失败\n原始链接：{url}"
-                        if is_auto_pack:
-                            failure_node = Node(
-                                name=sender_name,
-                                uin=sender_id,
-                                content=[Plain(failure_text)]
-                            )
-                            nodes.append(failure_node)
-                        else:
-                            nodes.append(Plain(failure_text))
+                        link_nodes = [Plain(failure_text)]
+                        normal_link_nodes.append(link_nodes)
+                        normal_link_count += 1  # 统计普通链接数量（包括解析失败的）
                         continue
+                    
+                    # 检查该链接是否有大视频（需要单独发送）
+                    link_has_large_video = result.get('force_separate_send', False)
                     
                     # 处理图片文件
                     if result.get('image_files'):
@@ -199,18 +200,28 @@ class ParserManager:
                             if file_path:
                                 video_files.append(file_path)
                     
-                    # 构建文本节点
-                    text_node = parser_instance.build_text_node(result, sender_name, sender_id, is_auto_pack)
-                    if text_node:
-                        nodes.append(text_node)
+                    # 为当前链接构建节点列表（扁平化结构）
+                    link_nodes = []
                     
-                    # 构建媒体节点
-                    media_nodes = parser_instance.build_media_nodes(result, sender_name, sender_id, is_auto_pack)
-                    nodes.extend(media_nodes)
+                    # 构建文本节点（统一返回 Plain 对象）
+                    text_node = parser_instance.build_text_node(result, sender_name, sender_id, False)
+                    if text_node:
+                        link_nodes.append(text_node)
+                    
+                    # 构建媒体节点（统一返回 Image/Video 对象列表）
+                    media_nodes = parser_instance.build_media_nodes(result, sender_name, sender_id, False)
+                    link_nodes.extend(media_nodes)
+                    
+                    if link_has_large_video:
+                        large_video_link_nodes.append(link_nodes)
+                    else:
+                        normal_link_nodes.append(link_nodes)
+                        normal_link_count += 1  # 统计普通链接数量
             
-            if not nodes:
+            # 如果没有任何节点，返回None
+            if not normal_link_nodes and not large_video_link_nodes:
                 return None
-            return (nodes, temp_files, video_files)
+            return (normal_link_nodes, large_video_link_nodes, temp_files, video_files, normal_link_count)
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError) as e:
             # 捕获预期的异常类型，避免插件崩溃
             # 网络错误、超时、数据格式错误等应该被静默处理

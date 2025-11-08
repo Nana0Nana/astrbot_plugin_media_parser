@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any, List
 import aiohttp
 import os
+import re
 
 
 class BaseVideoParser(ABC):
@@ -86,6 +87,18 @@ class BaseVideoParser(ABC):
         """
         try:
             async with session.head(video_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                # 优先检查Content-Range（无论状态码，因为它包含完整文件大小）
+                content_range = resp.headers.get("Content-Range")
+                if content_range:
+                    # Content-Range格式: bytes 286523392-286526818/286526819
+                    # 提取最后一个数字（完整文件大小）
+                    match = re.search(r'/\s*(\d+)', content_range)
+                    if match:
+                        size_bytes = int(match.group(1))
+                        size_mb = size_bytes / (1024 * 1024)
+                        return size_mb
+                
+                # 如果没有Content-Range，检查Content-Length
                 content_length = resp.headers.get("Content-Length")
                 if content_length:
                     size_bytes = int(content_length)
@@ -147,106 +160,64 @@ class BaseVideoParser(ABC):
         
         desc_text = "\n".join(text_parts)
         
-        if is_auto_pack:
-            from astrbot.api.message_components import Node
-            return Node(
-                name=sender_name,
-                uin=sender_id,
-                content=[Plain(desc_text)]
-            )
-        else:
-            return Plain(desc_text)
+        # 重构后：统一返回 Plain 对象，扁平化处理
+        return Plain(desc_text)
     
     def _build_gallery_nodes_from_files(self, image_files: List[str], sender_name: str, sender_id: Any, is_auto_pack: bool) -> List:
         """
         从文件路径列表构建图集节点
+        重构后：纯图片图集返回 Image 对象列表，扁平化处理
         
         Args:
             image_files: 图片文件路径列表
             sender_name: 发送者名称
             sender_id: 发送者ID
-            is_auto_pack: 是否打包为Node
+            is_auto_pack: 是否打包为Node（已废弃，统一返回 Image 列表）
             
         Returns:
-            List: 图集节点列表
+            List: Image 对象列表
         """
-        from astrbot.api.message_components import Image, Node
+        from astrbot.api.message_components import Image
         
         if not image_files or not isinstance(image_files, list):
             return []
         
-        nodes = []
+        images = []
         
-        if is_auto_pack:
-            gallery_node_content = []
-            for image_path in image_files:
-                if not image_path:
-                    continue
-                image_path = os.path.normpath(image_path)
-                if not os.path.exists(image_path):
-                    continue
-                try:
-                    image_node_content = Image.fromFileSystem(image_path)
-                    image_node = Node(
-                        name=sender_name,
-                        uin=sender_id,
-                        content=[image_node_content]
-                    )
-                    gallery_node_content.append(image_node)
-                except Exception:
-                    # 如果加载失败，清理临时文件
-                    if os.path.exists(image_path):
-                        try:
-                            os.unlink(image_path)
-                        except Exception:
-                            pass
-                    continue
-            
-            if gallery_node_content:
-                # 仅在图片数量 > 1 时创建父节点
-                if len(gallery_node_content) > 1:
-                    parent_gallery_node = Node(
-                        name=sender_name,
-                        uin=sender_id,
-                        content=gallery_node_content
-                    )
-                    nodes.append(parent_gallery_node)
-                else:
-                    nodes.extend(gallery_node_content)
-        else:
-            for image_path in image_files:
-                if not image_path:
-                    continue
-                image_path = os.path.normpath(image_path)
-                if not os.path.exists(image_path):
-                    continue
-                try:
-                    nodes.append(Image.fromFileSystem(image_path))
-                except Exception:
-                    # 如果加载失败，清理临时文件
-                    if os.path.exists(image_path):
-                        try:
-                            os.unlink(image_path)
-                        except Exception:
-                            pass
-                    continue
+        for image_path in image_files:
+            if not image_path:
+                continue
+            image_path = os.path.normpath(image_path)
+            if not os.path.exists(image_path):
+                continue
+            try:
+                images.append(Image.fromFileSystem(image_path))
+            except Exception:
+                # 如果加载失败，清理临时文件
+                if os.path.exists(image_path):
+                    try:
+                        os.unlink(image_path)
+                    except Exception:
+                        pass
+                continue
         
-        return nodes
+        return images
     
     def _build_gallery_nodes_from_urls(self, images: List[str], sender_name: str, sender_id: Any, is_auto_pack: bool) -> List:
         """
         从URL列表构建图集节点
+        重构后：纯图片图集返回 Image 对象列表，扁平化处理
         
         Args:
             images: 图片URL列表
-            sender_name: 发送者名称
-            sender_id: 发送者ID
-            is_auto_pack: 是否打包为Node
+            sender_name: 发送者名称（已废弃）
+            sender_id: 发送者ID（已废弃）
+            is_auto_pack: 是否打包为Node（已废弃）
             
         Returns:
-            List: 图集节点列表
+            List: Image 对象列表
         """
-        from astrbot.api.message_components import Image, Node
+        from astrbot.api.message_components import Image
         
         if not images or not isinstance(images, list):
             return []
@@ -255,87 +226,59 @@ class BaseVideoParser(ABC):
         if not valid_images:
             return []
         
-        nodes = []
+        images_list = []
+        for image_url in valid_images:
+            try:
+                images_list.append(Image.fromURL(image_url))
+            except Exception:
+                continue
         
-        if is_auto_pack:
-            gallery_node_content = []
-            for image_url in valid_images:
-                try:
-                    image_node = Node(
-                        name=sender_name,
-                        uin=sender_id,
-                        content=[Image.fromURL(image_url)]
-                    )
-                    gallery_node_content.append(image_node)
-                except Exception:
-                    continue
-            
-            if gallery_node_content:
-                # 仅在图片数量 > 1 时创建父节点
-                if len(gallery_node_content) > 1:
-                    parent_gallery_node = Node(
-                        name=sender_name,
-                        uin=sender_id,
-                        content=gallery_node_content
-                    )
-                    nodes.append(parent_gallery_node)
-                else:
-                    nodes.extend(gallery_node_content)
-        else:
-            for image_url in valid_images:
-                try:
-                    nodes.append(Image.fromURL(image_url))
-                except Exception:
-                    continue
-        
-        return nodes
+        return images_list
     
     def _build_video_node_from_url(self, video_url: str, sender_name: str, sender_id: Any, is_auto_pack: bool, cover: Optional[str] = None) -> Optional[Any]:
         """
         从URL构建视频节点
+        重构后：统一返回 Video 对象，不再包装为 Node
         
         Args:
             video_url: 视频URL
-            sender_name: 发送者名称
-            sender_id: 发送者ID
-            is_auto_pack: 是否打包为Node
+            sender_name: 发送者名称（已废弃）
+            sender_id: 发送者ID（已废弃）
+            is_auto_pack: 是否打包为Node（已废弃）
             cover: 封面图URL（可选）
             
         Returns:
-            视频节点，如果失败返回None
+            Video 对象，如果失败返回None
         """
-        from astrbot.api.message_components import Video, Node
+        from astrbot.api.message_components import Video
         
         if not video_url:
             return None
         
         try:
-            if is_auto_pack:
-                video_node = Node(
-                    name=sender_name,
-                    uin=sender_id,
-                    content=[Video.fromURL(video_url, cover=cover) if cover else Video.fromURL(video_url)]
-                )
+            # 重构后：直接返回 Video 对象，扁平化处理
+            if cover:
+                return Video.fromURL(video_url, cover=cover)
             else:
-                video_node = Video.fromURL(video_url, cover=cover) if cover else Video.fromURL(video_url)
-            return video_node
+                return Video.fromURL(video_url)
         except Exception:
             return None
     
     def _build_video_node_from_file(self, video_file_path: str, sender_name: str, sender_id: Any, is_auto_pack: bool) -> Optional[Any]:
         """
         从文件路径构建视频节点
+        重构后：统一返回 Video 对象，不再包装为 Node
         
         Args:
             video_file_path: 视频文件路径
-            sender_name: 发送者名称
-            sender_id: 发送者ID
-            is_auto_pack: 是否打包为Node
+            sender_name: 发送者名称（已废弃）
+            sender_id: 发送者ID（已废弃）
+            is_auto_pack: 是否打包为Node（已废弃）
             
         Returns:
-            视频节点，如果失败返回None
+            Video 对象，如果失败返回None
         """
-        from astrbot.api.message_components import Video, Node
+        from astrbot.api.message_components import Video
         
         if not video_file_path:
             return None
@@ -345,33 +288,67 @@ class BaseVideoParser(ABC):
             return None
         
         try:
-            video_node_content = Video.fromFileSystem(video_file_path)
-            if is_auto_pack:
-                video_node = Node(
-                    name=sender_name,
-                    uin=sender_id,
-                    content=[video_node_content]
-                )
-            else:
-                video_node = video_node_content
-            return video_node
+            # 重构后：直接返回 Video 对象，扁平化处理
+            return Video.fromFileSystem(video_file_path)
         except Exception:
             return None
+    
+    def _build_video_gallery_nodes_from_files(self, video_files: List[Dict[str, Any]], sender_name: str, sender_id: Any, is_auto_pack: bool) -> List:
+        """
+        从视频文件信息列表构建视频图集节点
+        重构后：视频图集混合结果全部单独发送，返回 Video 对象列表，扁平化处理
+        
+        Args:
+            video_files: 视频文件信息列表，每个元素包含 'file_path' 等字段
+            sender_name: 发送者名称（已废弃）
+            sender_id: 发送者ID（已废弃）
+            is_auto_pack: 是否打包为Node（已废弃，统一返回 Video 列表）
+            
+        Returns:
+            List: Video 对象列表
+        """
+        from astrbot.api.message_components import Video
+        
+        if not video_files or not isinstance(video_files, list):
+            return []
+        
+        # 重构后：视频图集混合结果全部单独发送，返回 Video 对象列表，扁平化处理
+        videos = []
+        for video_file_info in video_files:
+            file_path = video_file_info.get('file_path') if isinstance(video_file_info, dict) else video_file_info
+            if not file_path:
+                continue
+            file_path = os.path.normpath(file_path)
+            if not os.path.exists(file_path):
+                continue
+            try:
+                videos.append(Video.fromFileSystem(file_path))
+            except Exception:
+                # 如果加载失败，清理临时文件
+                if os.path.exists(file_path):
+                    try:
+                        os.unlink(file_path)
+                    except Exception:
+                        pass
+                continue
+        
+        return videos
     
     def build_media_nodes(self, result: Dict[str, Any], sender_name: str, sender_id: Any, is_auto_pack: bool) -> List:
         """
         构建媒体节点（视频或图片）
         默认实现：处理URL方式的图片集和视频
         子类可以重写此方法以支持文件方式或其他特殊需求
+        重构后：所有节点都扁平化返回（Image/Video 对象）
         
         Args:
             result: 解析结果
-            sender_name: 发送者名称
-            sender_id: 发送者ID
-            is_auto_pack: 是否打包为Node
+            sender_name: 发送者名称（已废弃）
+            sender_id: 发送者ID（已废弃）
+            is_auto_pack: 是否打包为Node（已废弃，统一扁平化返回）
             
         Returns:
-            List: 媒体节点列表
+            List: 媒体节点列表（Image/Video 对象）
         """
         nodes = []
         
