@@ -556,7 +556,7 @@ async def main():
     # use_proxy = True
     # proxy_url = "http://127.0.0.1:7890"  # HTTP代理，例如 Clash
     # proxy_url = "socks5://127.0.0.1:1080"  # SOCKS5代理，例如 V2Ray
-    use_proxy = True
+    use_proxy = False
     proxy_url = "http://127.0.0.1:7897" # clash verge 默认端口，请使用正确的代理配置
     
     parser_manager = init_parsers(use_proxy=use_proxy, proxy_url=proxy_url)
