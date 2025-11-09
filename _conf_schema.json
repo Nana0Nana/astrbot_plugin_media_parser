@@ -1,75 +1,93 @@
 {
-    "is_auto_parse": {
-        "description": "是否自动解析视频链接",
-        "type": "bool",
-        "hint": "启用后将自动识别并解析消息中的视频链接",
-        "default": true
-    },
     "is_auto_pack": {
         "description": "是否将解析结果打包为消息集合",
         "type": "bool",
         "hint": "需要在任何wechat平台使用请禁用此项",
         "default": true
     },
-    "max_video_size_mb": {
-        "description": "最大允许发送的视频大小(MB)",
-        "type": "float",
-        "hint": "超过此大小的视频将被跳过，不下载也不发送，设置为0表示不限制",
-        "default": 0.0
+    "trigger_settings": {
+        "description": "触发设置",
+        "type": "object",
+        "items": {
+            "is_auto_parse": {
+                "description": "是否自动解析视频链接",
+                "type": "bool",
+                "default": true
+            },
+            "trigger_keywords": {
+                "description": "手动触发解析的关键词列表",
+                "type": "list",
+                "hint": "当禁用'是否自动解析视频链接'时，消息头使用这些关键词才会触发解析",
+                "default": ["视频解析", "解析视频"]
+            }
+        }
     },
-    "large_video_threshold_mb": {
-        "description": "大视频阈值(MB)",
-        "type": "float",
-        "hint": "当视频大小超过此阈值时，将单独发送而不包含在转发消息集合中。建议设置为50MB以下，不能超过消息适配器100MB硬性阈值。设置为0表示不启用此功能",
-        "default": 100.0
+    "video_size_settings": {
+        "description": "视频大小设置",
+        "type": "object",
+        "items": {
+            "max_video_size_mb": {
+                "description": "最大允许发送的视频大小(MB)",
+                "type": "float",
+                "hint": "超过此大小的视频将被跳过，不下载也不发送。设置为0表示不限制",
+                "default": 0.0
+            },
+            "large_video_threshold_mb": {
+                "description": "大视频阈值(MB)",
+                "type": "float",
+                "hint": "当视频大小超过此阈值时，将单独发送而不包含在转发消息集合中。不能超过消息适配器100MB硬性阈值。设置为0表示不限制",
+                "default": 100.0
+            },
+            "cache_dir": {
+                "description": "视频缓存目录",
+                "type": "string",
+                "hint": "视频文件缓存目录，用于Twitter视频和所有超过阈值的大视频（例如：/app/sharedFolder/video_parser/cache）",
+                "default": "/app/sharedFolder/video_parser/cache"
+            }
+        }
     },
-    "enable_bilibili": {
-        "description": "是否启用B站解析器",
-        "type": "bool",
-        "hint": "禁用后将不再解析B站链接",
-        "default": true
+    "parser_enable_settings": {
+        "description": "解析器启用设置",
+        "type": "object",
+        "items": {
+            "enable_bilibili": {
+                "description": "是否启用B站解析器",
+                "type": "bool",
+                "default": true
+            },
+            "enable_douyin": {
+                "description": "是否启用抖音解析器",
+                "type": "bool",
+                "default": true
+            },
+            "enable_twitter": {
+                "description": "是否启用Twitter/X解析器",
+                "type": "bool",
+                "default": true
+            },
+            "enable_kuaishou": {
+                "description": "是否启用快手解析器",
+                "type": "bool",
+                "default": true
+            }
+        }
     },
-    "enable_douyin": {
-        "description": "是否启用抖音解析器",
-        "type": "bool",
-        "hint": "禁用后将不再解析抖音链接",
-        "default": true
-    },
-    "enable_twitter": {
-        "description": "是否启用Twitter/X解析器",
-        "type": "bool",
-        "hint": "禁用后将不再解析Twitter/X链接",
-        "default": true
-    },
-    "enable_kuaishou": {
-        "description": "是否启用快手解析器",
-        "type": "bool",
-        "hint": "禁用后将不再解析快手链接",
-        "default": true
-    },
-    "twitter_use_proxy": {
-        "description": "Twitter解析是否使用代理",
-        "type": "bool",
-        "hint": "启用后，Twitter解析和下载将通过代理进行",
-        "default": false
-    },
-    "twitter_proxy_url": {
-        "description": "Twitter代理地址",
-        "type": "string",
-        "hint": "代理地址格式：http://host:port 或 socks5://host:port（例如：http://127.0.0.1:7890）",
-        "default": ""
-    },
-    "cache_dir": {
-        "description": "视频缓存目录",
-        "type": "string",
-        "hint": "视频文件缓存目录，用于Twitter视频和所有超过100MB的大视频（例如：/app/sharedFolder/video_parser/cache）",
-        "default": "/app/sharedFolder/video_parser/cache"
-    },
-    "trigger_keywords": {
-        "description": "手动触发解析的关键词列表",
-        "type": "list",
-        "hint": "当is_auto_parse为false时，消息中包含这些关键词才会触发解析",
-        "default": ["视频解析", "解析视频"]
+    "twitter_proxy_settings": {
+        "description": "Twitter代理设置",
+        "type": "object",
+        "items": {
+            "twitter_use_proxy": {
+                "description": "Twitter解析是否使用代理",
+                "type": "bool",
+                "hint": "启用后，Twitter解析和下载将通过代理进行",
+                "default": false
+            },
+            "twitter_proxy_url": {
+                "description": "Twitter代理地址",
+                "type": "string",
+                "hint": "代理地址格式：http://host:port",
+                "default": ""
+            }
+        }
     }
 }
-
