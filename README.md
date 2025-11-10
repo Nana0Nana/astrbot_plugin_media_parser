@@ -275,6 +275,5 @@
   https://github.com/SocialSisterYi/bilibili-API-collect
 - 抖音解析方法参考自：CSDN 博客文章  
   https://blog.csdn.net/qq_53153535/article/details/141297614
-- 快手解析方法：自主实现
 - 推特解析使用免费第三方服务：fxtwitter（GitHub 项目 FxEmbed）  
   https://github.com/FxEmbed/FxEmbed
