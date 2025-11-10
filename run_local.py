@@ -249,74 +249,34 @@ def init_parsers(use_proxy=False, proxy_url=None):
 def print_metadata(result: dict, url: str, parser_name: str):
     """打印解析后的元数据"""
     print("\n" + "=" * 80)
-    print(f"解析器: {parser_name}")
-    print(f"原始链接: {url}")
+    print(f"解析器: {parser_name} | 链接: {url}")
     print("-" * 80)
     print(f"标题: {result.get('title', 'N/A')}")
     print(f"作者: {result.get('author', 'N/A')}")
-    desc = result.get('desc', '')
-    if desc:
-        if len(desc) > 100:
-            print(f"描述: {desc[:100]}...")
-        else:
-            print(f"描述: {desc}")
-    else:
-        print("描述: N/A")
-
+    
     if result.get('video_files'):
-        print("\n视频信息:")
-        for idx, video_file in enumerate(result['video_files'], 1):
-            video_url = video_file.get('url') or video_file.get('direct_url')
-            file_path = video_file.get('file_path')
-            if video_url:
-                print(f"  [{idx}] 视频URL: {video_url}")
-            elif file_path:
-                print(f"  [{idx}] 文件路径: {file_path}")
-            else:
-                print(f"  [{idx}] 视频信息: N/A")
-            file_size = video_file.get('file_size_mb')
-            if file_size is not None:
-                print(f"      大小: {file_size:.2f} MB")
-            else:
-                print("      大小: N/A")
-            thumbnail = video_file.get('thumbnail')
-            if thumbnail:
-                print(f"      缩略图: {thumbnail}")
-            duration = video_file.get('duration')
-            if duration:
-                print(f"      时长: {duration} 秒")
-
-    if result.get('image_files'):
-        print(f"\n图片文件 ({len(result['image_files'])} 张):")
-        for idx, image_file in enumerate(result['image_files'], 1):
-            print(f"  [{idx}] {image_file}")
-
+        print(f"\n视频: {len(result['video_files'])} 个")
+        for idx, vf in enumerate(result['video_files'], 1):
+            url_or_path = vf.get('url') or vf.get('direct_url') or vf.get('file_path', 'N/A')
+            size = f" ({vf.get('file_size_mb', 0):.2f} MB)" if vf.get('file_size_mb') else ""
+            print(f"  [{idx}] {url_or_path}{size}")
+    
+    if result.get('images'):
+        print(f"\n图片: {len(result['images'])} 张")
+        for idx, img_url in enumerate(result['images'][:5], 1):
+            print(f"  [{idx}] {img_url}")
+        if len(result['images']) > 5:
+            print(f"  ... 还有 {len(result['images']) - 5} 张")
+    
     if result.get('direct_url'):
-        print(f"\n视频直链: {result.get('direct_url')}")
-
-    if result.get('images') and not result.get('image_files'):
-        print(f"\n图片URL ({len(result['images'])} 张):")
-        for idx, image_url in enumerate(result['images'], 1):
-            print(f"  [{idx}] {image_url}")
-
-    if result.get('file_size_mb'):
-        print(f"\n视频大小: {result.get('file_size_mb'):.2f} MB")
-
-    if result.get('is_gallery'):
-        print("\n图集: 是")
-
-    if result.get('force_separate_send'):
-        print("\n强制单独发送: 是")
-
-    if result.get('timestamp'):
-        print(f"\n时间戳: {result.get('timestamp')}")
-
+        print(f"\n直链: {result.get('direct_url')}")
+    
     print("=" * 80)
 
 
-async def download_file(session: aiohttp.ClientSession, url: str, filepath: str, referer: str = None, proxy: str = None, headers: dict = None) -> bool:
+async def download_file(session: aiohttp.ClientSession, url: str, filepath: str, referer: str = None, proxy: str = None, headers: dict = None, max_retries: int = 2, retry_delay: float = 0.5) -> bool:
     """
-    下载文件到指定路径
+    下载文件到指定路径（带重试机制）
     Args:
         session: aiohttp会话
         url: 文件URL
@@ -324,67 +284,112 @@ async def download_file(session: aiohttp.ClientSession, url: str, filepath: str,
         referer: Referer请求头
         proxy: 代理地址（格式：http://host:port 或 socks5://host:port）
         headers: 自定义请求头（如果提供，会与默认请求头合并）
+        max_retries: 最大重试次数，默认2次
+        retry_delay: 重试延迟（秒），默认0.5秒，使用指数退避
     Returns:
         bool: 下载是否成功
     """
-    try:
-        # 默认请求头
-        default_headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': '*/*',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Sec-Fetch-Dest': 'image',
-            'Sec-Fetch-Mode': 'no-cors',
-            'Sec-Fetch-Site': 'cross-site',
-        }
-        
-        # 合并自定义请求头
-        if headers:
-            default_headers.update(headers)
-        
-        # 设置Referer
-        if referer:
-            default_headers['Referer'] = referer
-        
-        # 对于Twitter图片/视频，如果没有提供Referer，使用默认值
-        if 'pbs.twimg.com' in url or 'video.twimg.com' in url:
-            if 'Referer' not in default_headers:
-                default_headers['Referer'] = 'https://x.com/'
-        
-        async with session.get(
-            url, 
-            headers=default_headers, 
-            timeout=aiohttp.ClientTimeout(total=300, connect=30),
-            proxy=proxy
-        ) as response:
-            response.raise_for_status()
-            file_dir = os.path.dirname(filepath)
-            if file_dir:
-                os.makedirs(file_dir, exist_ok=True)
-            with open(filepath, 'wb') as f:
-                async for chunk in response.content.iter_chunked(8192):
-                    f.write(chunk)
-                # 立即刷新缓冲区到磁盘
-                f.flush()
+    # 默认请求头
+    default_headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Sec-Fetch-Dest': 'image',
+        'Sec-Fetch-Mode': 'no-cors',
+        'Sec-Fetch-Site': 'cross-site',
+    }
+    
+    # 合并自定义请求头
+    if headers:
+        default_headers.update(headers)
+    
+    # 设置Referer
+    if referer:
+        default_headers['Referer'] = referer
+    
+    # 对于Twitter图片/视频，如果没有提供Referer，使用默认值
+    if 'pbs.twimg.com' in url or 'video.twimg.com' in url:
+        if 'Referer' not in default_headers:
+            default_headers['Referer'] = 'https://x.com/'
+    
+    # 判断是否为视频（根据URL或文件扩展名）
+    is_video = '.mp4' in url.lower() or filepath.endswith('.mp4')
+    
+    for attempt in range(max_retries + 1):
+        file_path = None
+        try:
+            if is_video:
+                timeout = aiohttp.ClientTimeout(
+                    total=600,
+                    connect=30,
+                    sock_read=300
+                )
+            else:
+                timeout = aiohttp.ClientTimeout(total=60)
+            
+            async with session.get(
+                url, 
+                headers=default_headers, 
+                timeout=timeout,
+                proxy=proxy
+            ) as response:
+                response.raise_for_status()
+                file_dir = os.path.dirname(filepath)
+                if file_dir:
+                    os.makedirs(file_dir, exist_ok=True)
+                chunk_size = 1024 * 1024
+                with open(filepath, 'wb') as f:
+                    async for chunk in response.content.iter_chunked(chunk_size):
+                        f.write(chunk)
+                    f.flush()
+                    try:
+                        os.fsync(f.fileno())
+                    except Exception:
+                        pass
+            return True
+        except Exception:
+            if os.path.exists(filepath):
                 try:
-                    os.fsync(f.fileno())
+                    os.unlink(filepath)
                 except Exception:
                     pass
-        return True
-    except aiohttp.ClientConnectorError as e:
-        error_msg = str(e)
-        if 'pbs.twimg.com' in url or 'video.twimg.com' in url or 'x.com' in url or 'twitter.com' in url:
-            print(f"下载失败: {error_msg}")
-            print("提示: Twitter/X 在中国大陆需要代理才能访问。")
-            print("      请在脚本中配置代理：修改 init_parsers(use_proxy=True, proxy_url='your_proxy_url')")
-        else:
-            print(f"下载失败: {error_msg}")
-        return False
-    except Exception as e:
-        print(f"下载失败: {e}")
-        return False
+            if attempt < max_retries:
+                await asyncio.sleep(retry_delay * (2 ** attempt))
+                continue
+            return False
+    
+    return False
+
+
+async def download_media_concurrent(download_tasks: list, download_dir: str, session: aiohttp.ClientSession, max_concurrent: int = 5):
+    """并发下载多个媒体文件"""
+    os.makedirs(os.path.abspath(download_dir), exist_ok=True)
+    if not download_tasks:
+        return
+    
+    total_files = 0
+    for r, _, _ in download_tasks:
+        total_files += len(r.get('video_files', [])) or (1 if r.get('direct_url') else 0)
+        total_files += len(r.get('images', [])) or len([img for img in r.get('image_files', []) if isinstance(img, str) and os.path.exists(img)])
+    
+    print(f"\n开始并发下载 {len(download_tasks)} 个链接内的媒体（共 {total_files} 个文件，最大并发数: {max_concurrent}）...")
+    
+    semaphore = asyncio.Semaphore(max_concurrent)
+    
+    async def download_single_media(result, url, parser):
+        async with semaphore:
+            return await download_media(result, url, download_dir, session, parser)
+    
+    tasks = [download_single_media(r, u, p) for r, u, p in download_tasks]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    success_count = sum(1 for r in results if r is True)
+    failed_count = len(results) - success_count
+    print(f"\n下载完成: 共 {len(results)} 个媒体，失败 {failed_count} 个")
+    if failed_count > 0:
+        print("提示: 部分媒体下载失败，请检查网络连接和代理配置")
 
 
 async def download_media(result: dict, url: str, download_dir: str, session: aiohttp.ClientSession, parser=None):
@@ -396,198 +401,222 @@ async def download_media(result: dict, url: str, download_dir: str, session: aio
         download_dir: 下载目录
         session: aiohttp会话
         parser: 解析器实例（用于获取代理设置等）
+    Returns:
+        bool: 下载是否成功
     """
-    download_dir = os.path.abspath(download_dir)
-    os.makedirs(download_dir, exist_ok=True)
-    
-    # 获取代理设置（如果解析器支持）
-    proxy = None
-    download_headers = None
-    if parser and hasattr(parser, 'use_proxy') and hasattr(parser, 'proxy_url'):
-        if parser.use_proxy and parser.proxy_url:
-            proxy = parser.proxy_url
-    if parser and hasattr(parser, 'headers'):
-        download_headers = parser.headers.copy()
+    try:
+        download_dir = os.path.abspath(download_dir)
+        os.makedirs(download_dir, exist_ok=True)
+        
+        proxy = None
+        download_headers = None
+        if parser:
+            if hasattr(parser, 'use_proxy') and hasattr(parser, 'proxy_url') and parser.use_proxy and parser.proxy_url:
+                proxy = parser.proxy_url
+            if hasattr(parser, 'headers'):
+                download_headers = parser.headers.copy()
 
-    # 为每个链接创建子目录（基于域名和路径）
-    parsed_url = urlparse(url)
-    domain = parsed_url.netloc.replace('.', '_').replace(':', '_')
-    path_parts = parsed_url.path.strip('/').split('/')
-    path_parts = [p for p in path_parts if p and len(p) > 0]
-    if path_parts:
-        path = '_'.join(path_parts[:2])
-        path = re.sub(r'[^\w\-_]', '_', path)
-        if len(path) > 30:
-            path = path[:30]
-        link_dir_name = f"{domain}_{path}"
-    else:
-        link_dir_name = f"{domain}_root"
-
-    link_dir = os.path.join(download_dir, link_dir_name)
-    link_dir = os.path.normpath(link_dir)
-    os.makedirs(link_dir, exist_ok=True)
-
-    downloaded_files = []
-
-    # 下载视频文件
-    # 本地测试时，解析结果只包含URL信息，不包含文件路径
-    # 所有视频都从URL下载到download目录
-    video_urls = []
-    
-    # 从video_files中提取URL（适用于Twitter等有video_files的情况）
-    if result.get('video_files'):
-        for idx, video_file in enumerate(result['video_files'], 1):
-            video_url = video_file.get('url') or video_file.get('direct_url')
-            if video_url:
-                video_urls.append((idx, video_url))
-            else:
-                # 兼容性：如果有file_path且文件存在，复制文件（正常情况下不应该发生）
-                file_path = video_file.get('file_path')
-                if file_path and os.path.exists(file_path):
-                    filename = os.path.basename(file_path) or f"video_{idx}.mp4"
-                    dest_path = os.path.join(link_dir, filename)
-                    shutil.copy2(file_path, dest_path)
-                    downloaded_files.append(dest_path)
-                    print(f"✓ 已复制视频文件: {dest_path}")
-                else:
-                    print(f"⚠ 视频 {idx} 无法下载：无有效的URL")
-    
-    # 如果没有video_files，但有direct_url，使用direct_url（适用于Bilibili、Douyin、Kuaishou等）
-    if not video_urls and result.get('direct_url'):
-        video_urls.append((1, result.get('direct_url')))
-    
-    # 从URL下载所有视频到download目录
-    for idx, video_url in video_urls:
-        filename = f"video_{idx}.mp4"
-        dest_path = os.path.join(link_dir, filename)
-        print(f"正在下载视频 {idx}...")
-        referer = url
-        # 对于Twitter视频，设置正确的Referer
-        headers = download_headers
-        if 'video.twimg.com' in video_url or 'pbs.twimg.com' in video_url:
-            # 从原始URL提取tweet_id
-            tweet_id_match = re.search(r'/status/(\d+)', url)
-            if tweet_id_match:
-                tweet_id = tweet_id_match.group(1)
-                referer = f'https://x.com/status/{tweet_id}'
-            else:
-                referer = 'https://x.com/'
-            # 对于Twitter视频，使用解析器的headers（包含Accept等）
-            if parser and hasattr(parser, 'headers'):
-                headers = parser.headers.copy()
-                if referer:
-                    headers['Referer'] = referer
-        if await download_file(session, video_url, dest_path, referer=referer, proxy=proxy, headers=headers):
-            downloaded_files.append(dest_path)
-            print(f"✓ 已下载视频: {dest_path}")
+        parsed_url = urlparse(url)
+        domain = parsed_url.netloc.replace('.', '_').replace(':', '_')
+        path_parts = [p for p in parsed_url.path.strip('/').split('/') if p]
+        if path_parts:
+            path = re.sub(r'[^\w\-_]', '_', '_'.join(path_parts[:2]))[:30]
+            link_dir_name = f"{domain}_{path}"
         else:
-            print(f"⚠ 视频 {idx} 下载失败")
+            link_dir_name = f"{domain}_root"
+        
+        link_dir = os.path.normpath(os.path.join(download_dir, link_dir_name))
+        os.makedirs(link_dir, exist_ok=True)
 
-    # 下载图片文件
-    # 本地测试时，所有图片都从URL下载
-    # 首先处理image_files（可能是文件路径，兼容性处理）
-    if result.get('image_files'):
-        for idx, image_file in enumerate(result['image_files'], 1):
-            if isinstance(image_file, str):
-                # 如果是文件路径且文件存在，复制文件（兼容性处理）
-                if os.path.exists(image_file):
-                    filename = os.path.basename(image_file) or f"image_{idx}.jpg"
-                    dest_path = os.path.join(link_dir, filename)
-                    shutil.copy2(image_file, dest_path)
-                    downloaded_files.append(dest_path)
-                    print(f"✓ 已复制图片: {dest_path}")
-                # 否则忽略（可能是临时文件路径，但文件不存在）
-    
-    # 从URL下载图片（适用于所有解析器）
-    if result.get('images'):
-        for idx, image_url in enumerate(result['images'], 1):
-            # 从URL推断文件扩展名
-            ext = '.jpg'
-            if '.png' in image_url.lower():
-                ext = '.png'
-            elif '.webp' in image_url.lower():
-                ext = '.webp'
-            elif '.gif' in image_url.lower():
-                ext = '.gif'
-            filename = f"image_{idx}{ext}"
-            dest_path = os.path.join(link_dir, filename)
-            print(f"正在下载图片 {idx}...")
-            referer = url
-            # 对于Twitter图片，设置正确的Referer
-            if 'pbs.twimg.com' in image_url:
-                # 从原始URL提取tweet_id
-                tweet_id_match = re.search(r'/status/(\d+)', url)
-                if tweet_id_match:
-                    tweet_id = tweet_id_match.group(1)
-                    referer = f'https://x.com/status/{tweet_id}'
+        downloaded_files = []
+        failed_count = 0
+        video_urls = []
+        
+        if result.get('video_files'):
+            for idx, vf in enumerate(result['video_files'], 1):
+                video_url = vf.get('url') or vf.get('direct_url')
+                if video_url:
+                    video_urls.append((idx, video_url))
+                elif vf.get('file_path') and os.path.exists(vf['file_path']):
+                    dest = os.path.join(link_dir, f"video_{idx}.mp4")
+                    try:
+                        shutil.copy2(vf['file_path'], dest)
+                        downloaded_files.append(dest)
+                    except Exception:
+                        failed_count += 1
                 else:
-                    referer = 'https://x.com/'
-            # 对于Twitter图片，使用解析器的headers（包含Accept等）
-            headers = download_headers
-            if 'pbs.twimg.com' in image_url and parser and hasattr(parser, 'headers'):
-                headers = parser.headers.copy()
-                if referer:
-                    headers['Referer'] = referer
-            if await download_file(session, image_url, dest_path, referer=referer, proxy=proxy, headers=headers):
-                downloaded_files.append(dest_path)
-                print(f"✓ 已下载图片: {dest_path}")
-            else:
-                print(f"⚠ 图片 {idx} 下载失败")
+                    failed_count += 1
+        
+        if not video_urls and result.get('direct_url'):
+            video_urls.append((1, result['direct_url']))
+        
+        download_file_tasks = []
+        
+        for idx, video_url in video_urls:
+            dest_path = os.path.join(link_dir, f"video_{idx}.mp4")
+            headers = download_headers.copy() if download_headers else {}
+            referer = url
+            
+            if 'video.twimg.com' in video_url or 'pbs.twimg.com' in video_url:
+                m = re.search(r'/status/(\d+)', url)
+                referer = f'https://x.com/status/{m.group(1)}' if m else 'https://x.com/'
+            
+            if parser and hasattr(parser, 'headers'):
+                headers.update(parser.headers)
+            headers['Referer'] = referer
+            download_file_tasks.append(('video', idx, video_url, dest_path, referer, proxy, headers))
+        
+        image_urls = result.get('images', [])
+        image_files = result.get('image_files', [])
+        valid_image_files = [img for img in image_files if isinstance(img, str) and os.path.exists(img)] if image_files else []
+        
+        if image_urls:
+            image_url_lists = result.get('image_url_lists', [])
+            for idx, primary_url in enumerate(image_urls):
+                ext = next((e for e in ['.png', '.webp', '.gif'] if e in primary_url.lower()), '.jpg')
+                dest_path = os.path.join(link_dir, f"image_{idx + 1}{ext}")
+                
+                url_list = [primary_url]
+                if idx < len(image_url_lists) and image_url_lists[idx]:
+                    backup_urls = image_url_lists[idx]
+                    url_list = backup_urls if backup_urls[0] == primary_url else [primary_url] + backup_urls
+                
+                headers = download_headers.copy() if download_headers else {}
+                referer = url
+                
+                if 'pbs.twimg.com' in primary_url:
+                    m = re.search(r'/status/(\d+)', url)
+                    referer = f'https://x.com/status/{m.group(1)}' if m else 'https://x.com/'
+                elif 'douyinpic.com' in primary_url or 'p3-sign.douyinpic.com' in primary_url:
+                    referer = url
+                elif 'kuaishou.com' in url or any('kspkg.com' in u for u in url_list):
+                    referer = url
+                
+                if parser and hasattr(parser, 'headers'):
+                    headers.update(parser.headers)
+                headers['Referer'] = referer
+                download_file_tasks.append(('image', idx + 1, url_list, dest_path, referer, proxy, headers))
+        elif valid_image_files:
+            for idx, img_file in enumerate(valid_image_files, 1):
+                dest_path = os.path.join(link_dir, f"image_{idx}{os.path.splitext(img_file)[1] or '.jpg'}")
+                try:
+                    shutil.copy2(img_file, dest_path)
+                    downloaded_files.append(dest_path)
+                except Exception:
+                    failed_count += 1
+        
+        if download_file_tasks:
+            semaphore = asyncio.Semaphore(3)
+            failed_count_list = [failed_count]
+            downloaded_files_list = [downloaded_files]
+            
+            async def download_with_info(media_type, idx, file_url_or_list, dest_path, referer, proxy, headers):
+                async with semaphore:
+                    try:
+                        if isinstance(file_url_or_list, list):
+                            success = False
+                            for url in file_url_or_list:
+                                if url and isinstance(url, str) and url.startswith(('http://', 'https://')):
+                                    success = await download_file(session, url, dest_path, referer=referer, proxy=proxy, headers=headers, max_retries=1, retry_delay=0.5)
+                                    if success:
+                                        break
+                        else:
+                            success = await download_file(session, file_url_or_list, dest_path, referer=referer, proxy=proxy, headers=headers, max_retries=3, retry_delay=1.0)
+                        
+                        if success:
+                            downloaded_files_list[0].append(dest_path)
+                        else:
+                            failed_count_list[0] += 1
+                    except Exception:
+                        failed_count_list[0] += 1
+            
+            tasks = [download_with_info(*task) for task in download_file_tasks]
+            await asyncio.gather(*tasks, return_exceptions=True)
+            
+            failed_count = failed_count_list[0]
+            downloaded_files = downloaded_files_list[0]
 
-
-    if downloaded_files:
-        print(f"\n所有文件已保存到: {link_dir}")
-    else:
-        print("\n没有可下载的文件")
+        if failed_count == 0 and len(downloaded_files) > 0:
+            return True
+        print(f"{url} 下载失败！")
+        print("-" * 80)
+        return False
+    except Exception:
+        print(f"{url} 下载失败！")
+        print("-" * 80)
+        return False
 
 
 async def main():
     """主函数"""
     print("=" * 80)
     print("视频链接解析测试工具")
+    print("支持的平台: B站、抖音、Twitter/X、快手")
+    print("输入 'q' 退出程序")
     print("=" * 80)
-    print("\n支持的平台: B站、抖音、Twitter/X、快手")
-    print("退出方式:")
-    print("  - 输入链接时: 输入 'q' / 'quit' / 'exit' 退出程序")
-    print("  - 询问下载时: 输入 'q' 也可以退出程序\n")
     
-    # 代理配置（Twitter/X 在墙内需要代理才能访问）
-    # 如果需要在本地测试时使用代理，请取消注释并修改以下配置：
-    # use_proxy = True
-    # proxy_url = "http://127.0.0.1:7890"  # HTTP代理，例如 Clash
-    # proxy_url = "socks5://127.0.0.1:1080"  # SOCKS5代理，例如 V2Ray
-    use_proxy = False
-    proxy_url = "http://127.0.0.1:7897" # clash verge 默认端口，请使用正确的代理配置
+    use_proxy = True
+    proxy_url = "http://127.0.0.1:7897"
     
     parser_manager = init_parsers(use_proxy=use_proxy, proxy_url=proxy_url)
     download_dir = os.path.join(os.path.dirname(__file__), "download")
     os.makedirs(download_dir, exist_ok=True)
     
     if use_proxy:
-        print(f"✓ 已启用代理: {proxy_url}")
-    else:
-        print("提示: Twitter/X 链接需要代理才能下载。")
-        print("      如需使用代理，请修改脚本中的 use_proxy 和 proxy_url 配置（第538-539行）。")
-    print()
+        print(f"✓ 代理: {proxy_url}\n")
 
     timeout = aiohttp.ClientTimeout(total=60)
 
     while True:
         try:
-            text = input("请输入包含视频链接的文本（输入 q/quit/exit 退出）: ").strip()
-
-            if text.lower() in ('quit', 'exit', 'q', '退出'):
-                print("再见！")
-                break
-
-            if not text:
-                print("输入不能为空，请重新输入。")
+            print("\n请输入包含视频链接的文本（可粘贴多行，输入空行结束，输入 q 退出）:")
+            print("提示: 如果直接粘贴多行文本，请在第一行粘贴，然后按回车，再输入一个空行结束")
+            lines = []
+            empty_line_count = 0
+            while True:
+                try:
+                    line = input(">>> " if not lines else "... ").strip()
+                    if line.lower() == 'q':
+                        print("再见！")
+                        return
+                    if not line:
+                        empty_line_count += 1
+                        if empty_line_count >= 1 and lines:
+                            break
+                        if not lines:
+                            continue
+                    else:
+                        empty_line_count = 0
+                        # 检查是否包含多行（可能是直接粘贴的）
+                        if '\n' in line or '\r' in line:
+                            # 分割多行
+                            multilines = [l.strip() for l in line.replace('\r\n', '\n').replace('\r', '\n').split('\n') if l.strip()]
+                            lines.extend(multilines)
+                        else:
+                            lines.append(line)
+                except (EOFError, KeyboardInterrupt):
+                    if lines:
+                        break
+                    print("\n\n程序已中断")
+                    return
+            
+            if not lines:
+                print("输入不能为空，请重新输入。\n")
                 continue
-
-            print(f"\n正在解析: {text}")
+            
+            text = '\n'.join(lines)
+            print(f"\n正在解析... ({len(text)} 字符, {len(lines)} 行)")
+            print(f"调试: 提取到的文本前100字符: {text[:100]}...")
             print("-" * 80)
 
-            async with aiohttp.ClientSession(timeout=timeout) as session:
+            connector = aiohttp.TCPConnector(
+                limit=100,
+                limit_per_host=10,
+                ttl_dns_cache=300,
+                force_close=False,
+                enable_cleanup_closed=True
+            )
+            async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
                 # 提取链接
                 links_with_parser = parser_manager.extract_all_links(text)
                 if not links_with_parser:
@@ -595,57 +624,44 @@ async def main():
                     continue
 
                 print(f"找到 {len(links_with_parser)} 个链接")
-
-                # 解析每个链接
-                should_exit_loop = False
+                if len(links_with_parser) > 0:
+                    print("链接列表:")
+                    for idx, (url, parser) in enumerate(links_with_parser, 1):
+                        parser_name = parser.name if hasattr(parser, 'name') else type(parser).__name__
+                        print(f"  [{idx}] {parser_name}: {url}")
+                print()
+                
+                parse_results = []
                 for url, parser in links_with_parser:
-                    if should_exit_loop:
-                        break
-                    print(f"\n解析链接: {url}")
                     try:
                         result = await parser.parse(session, url)
-                        if result:
-                            parser_name = parser.name if hasattr(parser, 'name') else type(parser).__name__
-                            print_metadata(result, url, parser_name)
-
-                            # 询问是否下载
-                            while True:
-                                choice = input("\n是否下载到本地? (y/n/q退出): ").strip().lower()
-                                if choice in ('y', 'yes', '是'):
-                                    await download_media(result, url, download_dir, session, parser=parser)
-                                    break
-                                elif choice in ('n', 'no', '否'):
-                                    print("跳过下载")
-                                    break
-                                elif choice in ('q', 'quit', 'exit', '退出'):
-                                    print("再见！")
-                                    should_exit_loop = True
-                                    break
-                                else:
-                                    print("请输入 y、n 或 q（退出）")
-                            
-                            if should_exit_loop:
-                                break
-                        else:
-                            print(f"解析失败: {url}")
+                        parse_results.append((url, parser, result, None if result else "解析失败"))
                     except Exception as e:
-                        error_msg = str(e)
-                        if error_msg.startswith("解析失败："):
-                            print(f"{error_msg}")
-                        else:
-                            print(f"解析出错: {error_msg}")
-                        traceback.print_exc()
+                        parse_results.append((url, parser, None, str(e)))
                 
-                if should_exit_loop:
-                    return
-
+                for url, parser, result, error in parse_results:
+                    if result:
+                        parser_name = parser.name if hasattr(parser, 'name') else type(parser).__name__
+                        print_metadata(result, url, parser_name)
+                    else:
+                        print(f"解析失败: {url} - {error}")
+                
+                if parse_results:
+                    choice = input("\n是否下载所有媒体到本地? (y/n/q退出): ").strip().lower()
+                    if choice == 'q':
+                        return
+                    elif choice in ('y', 'yes', '是'):
+                        download_tasks = [(r, u, p) for u, p, r, e in parse_results if r]
+                        if download_tasks:
+                            await download_media_concurrent(download_tasks, download_dir, session)
+                
                 print("\n" + "=" * 80 + "\n")
 
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, EOFError):
             print("\n\n程序已中断")
             break
         except Exception as e:
-            print(f"\n发生错误: {e}")
+            print(f"\n错误: {e}")
             traceback.print_exc()
 
 
