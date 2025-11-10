@@ -23,22 +23,22 @@
 <tbody>
 <tr>
 <td>B站</td>
-<td>视频短链（b23.tv/...）<br>视频av号（www.bilibili.com/video/av...）<br>视频BV号（www.bilibili.com/video/BV...）</td>
+<td>视频短链（<code>b23&#46;tv/...</code>）<br>视频av号（<code>www&#46;bilibili&#46;com/video/av...</code>）<br>视频BV号（<code>www&#46;bilibili&#46;com/video/BV...</code>）</td>
 <td>视频</td>
 </tr>
 <tr>
 <td>抖音</td>
-<td>短链（v.douyin.com/...）<br>视频长链（www.douyin.com/video/...）<br>图集长链（www.douyin.com/note/...）</td>
+<td>短链（<code>v&#46;douyin&#46;com/...</code>）<br>视频长链（<code>www&#46;douyin&#46;com/video/...</code>）<br>图集长链（<code>www&#46;douyin&#46;com/note/...</code>）</td>
 <td>视频、图集</td>
 </tr>
 <tr>
 <td>快手</td>
-<td>短链（v.kuaishou.com/...）<br>视频长链（www.kuaishou.com/short-video/...）</td>
+<td>短链（<code>v&#46;kuaishou&#46;com/...</code>）<br>视频长链（<code>www&#46;kuaishou&#46;com/short-video/...</code>）</td>
 <td>视频、图集</td>
 </tr>
 <tr>
 <td>推特</td>
-<td>twitter 链接（twitter.com/.../status/...）<br>x 链接（x.com/.../status/...）</td>
+<td>twitter 链接（<code>twitter&#46;com/.../status/...</code>）<br>x 链接（<code>x&#46;com/.../status/...</code>）</td>
 <td>视频、图集</td>
 </tr>
 </tbody>
