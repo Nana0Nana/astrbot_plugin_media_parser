@@ -36,10 +36,15 @@ astrbot_plugin_video_parser/
 
 - **提供的工具方法**：
   - `get_video_size()`: 获取视频文件大小
-  - `check_video_size()`: 检查视频大小是否在限制内
+  - `get_image_size()`: 获取图片文件大小
+  - `check_media_size()`: 检查媒体大小是否在限制内（支持视频和图片）
+  - `check_video_size()`: 检查视频大小是否在限制内（兼容旧接口）
   - `build_text_node()`: 构建文本节点（返回 Plain 对象）
   - `build_media_nodes()`: 构建媒体节点（返回 Plain/Image/Video 对象列表）
-  - `_download_large_video_to_cache()`: 下载大视频到缓存目录
+  - `_download_large_media_to_cache()`: 下载大媒体到缓存目录（支持视频和图片）
+  - `_download_large_video_to_cache()`: 下载大视频到缓存目录（兼容旧接口）
+  - `_check_cache_dir_available()`: 检查缓存目录是否可用（可写）
+  - `_pre_download_media()`: 预先下载所有媒体到本地
   - `_build_gallery_nodes_from_files()`: 从文件构建图片图集节点
   - `_build_gallery_nodes_from_urls()`: 从URL构建图片图集节点
   - `_build_video_node_from_file()`: 从文件构建视频节点
@@ -47,9 +52,11 @@ astrbot_plugin_video_parser/
   - `_build_video_gallery_nodes_from_files()`: 从文件构建视频图集节点
 
 - **配置参数**：
-  - `max_video_size_mb`: 最大允许的视频大小(MB)，超过此大小的视频将被跳过
-  - `large_video_threshold_mb`: 大视频阈值(MB)，超过此阈值的视频将单独发送
-  - `cache_dir`: 视频文件缓存目录，用于存储大视频和 Twitter 视频
+  - `max_media_size_mb`: 最大允许的媒体大小(MB)，超过此大小的媒体（视频和图片）将被跳过
+  - `large_media_threshold_mb`: 大媒体阈值(MB)，超过此阈值的媒体（视频和图片）将单独发送
+  - `cache_dir`: 媒体文件缓存目录，用于存储大媒体和 Twitter 视频
+  - `pre_download_all_media`: 是否预先下载所有媒体到本地
+  - `max_concurrent_downloads`: 最大并发下载数
 
 ### 2. ParserManager (parser_manager.py)
 
@@ -82,22 +89,29 @@ astrbot_plugin_video_parser/
 - **BilibiliParser** (`bilibili.py`): 解析B站视频（UGC/PGC）
   - 支持视频大小检测（需要 Referer 请求头）
   - 支持大视频下载到缓存
+  - 支持预先下载所有视频到缓存目录
   - 重写 `get_video_size()` 方法以支持 B站特殊的请求头要求
 
 - **DouyinParser** (`douyin.py`): 解析抖音视频/图片集
   - 支持视频和图集解析
-  - 支持视频大小检测（需要 Referer 请求头）
-  - 支持大视频下载到缓存
+  - 支持媒体大小检测（视频和图片，需要 Referer 请求头）
+  - 支持大媒体下载到缓存
+  - 支持预先下载所有媒体到缓存目录
+  - 优先检查预下载开关，避免重复下载
   - 重写 `get_video_size()` 方法以支持抖音特殊的请求头要求
 
 - **KuaishouParser** (`kuaishou.py`): 解析快手视频/图片集
   - 支持视频和图集解析
-  - 支持大视频下载到缓存
+  - 支持媒体大小检测（视频和图片）
+  - 支持大媒体下载到缓存
+  - 支持预先下载所有媒体到缓存目录
+  - 优先检查预下载开关，避免重复下载
 
 - **TwitterParser** (`twitter.py`): 解析Twitter/X视频/图片
   - 支持视频和图片解析
   - 支持代理配置（用于访问 Twitter API 和下载媒体）
   - 所有视频都会下载到缓存目录（因为 Twitter 视频无法直接通过 URL 发送）
+  - 支持预先下载所有媒体到缓存目录（优先检查预下载开关）
   - 支持重试机制（API 调用和媒体下载）
   - 重写 `get_video_size()` 方法以支持 Twitter 特殊的请求头要求
 
@@ -154,9 +168,13 @@ AstrBot插件主类：
 5. 并行解析所有链接 (asyncio.gather)
    ↓ (对每个链接)
 6. 具体解析器.parse()
-   - 检测视频大小
-   - 如果超过大视频阈值，下载到缓存目录
-   - 设置 force_separate_send 标志
+   - 检测媒体大小（视频和图片）
+   - 优先检查预下载开关（pre_download_all_media）
+     * 如果开启预下载：所有媒体（视频和图片）并发下载到缓存目录
+     * 如果未开启预下载：
+       - 大媒体（超过阈值）：下载到缓存目录
+       - 小媒体：视频使用URL，图片下载到临时文件
+   - 设置 force_separate_send 标志（大媒体）
    - 返回统一格式的解析结果
    ↓
 7. 解析器.build_text_node() 和 build_media_nodes()
@@ -195,32 +213,37 @@ AstrBot插件主类：
 - **is_auto_parse**: 是否自动解析视频链接（bool，默认 true）
 - **trigger_keywords**: 手动触发解析的关键词列表（list，默认 ["视频解析", "解析视频"]）
 
-### 3. video_size_settings (视频大小设置)
-- **max_video_size_mb**: 最大允许发送的视频大小(MB)（float，默认 0.0，0表示不限制）
-- **large_video_threshold_mb**: 大视频阈值(MB)（float，默认 100.0，不能超过100MB，0表示不启用）
-- **cache_dir**: 视频缓存目录（string，默认 "/app/sharedFolder/video_parser/cache"）
+### 3. media_size_settings (媒体大小设置)
+- **max_media_size_mb**: 最大允许发送的媒体大小(MB)（float，默认 0.0，0表示不限制）
+- **large_media_threshold_mb**: 大媒体阈值(MB)（float，默认 100.0，不能超过100MB，0表示不启用）
 
-### 4. parser_enable_settings (解析器启用设置)
+### 4. download_settings (下载和缓存设置)
+- **cache_dir**: 媒体缓存目录（string，默认 "/app/sharedFolder/video_parser/cache"）
+- **pre_download_all_media**: 是否预先下载所有媒体到本地（bool，默认 false）
+- **max_concurrent_downloads**: 最大并发下载数（int，默认 3，建议值：3-5）
+
+### 5. parser_enable_settings (解析器启用设置)
 - **enable_bilibili**: 是否启用B站解析器（bool，默认 true）
 - **enable_douyin**: 是否启用抖音解析器（bool，默认 true）
 - **enable_twitter**: 是否启用Twitter/X解析器（bool，默认 true）
 - **enable_kuaishou**: 是否启用快手解析器（bool，默认 true）
 
-### 5. twitter_proxy_settings (Twitter代理设置)
+### 6. twitter_proxy_settings (Twitter代理设置)
 - **twitter_use_proxy**: Twitter解析是否使用代理（bool，默认 false）
 - **twitter_proxy_url**: Twitter代理地址（string，默认 ""，格式：http://host:port）
 
 ## 核心特性
 
-### 1. 大视频处理机制
+### 1. 大媒体处理机制
 
-当视频大小超过 `large_video_threshold_mb` 阈值时：
+当媒体大小（视频或图片）超过 `large_media_threshold_mb` 阈值时：
 
-1. **下载到缓存**：视频会被下载到配置的缓存目录
-2. **设置标志**：`force_separate_send = True`，`has_large_video = True`
-3. **单独发送**：大视频链接的所有节点（文本和媒体）都会单独发送，不包含在转发消息集合中
-4. **提示消息**：在发送大视频前，会显示提示消息（仅当 `is_auto_pack=True` 时）
-5. **立即清理**：发送后立即删除缓存文件
+1. **检查缓存目录**：如果缓存目录不可用，直接结束下载流程并返回"本地缓存路径无效"错误
+2. **下载到缓存**：媒体会被下载到配置的缓存目录
+3. **设置标志**：`force_separate_send = True`，`has_large_video = True`（仅视频）
+4. **单独发送**：大媒体链接的所有节点（文本和媒体）都会单独发送，不包含在转发消息集合中
+5. **提示消息**：在发送大媒体前，会显示提示消息（仅当 `is_auto_pack=True` 时）
+6. **立即清理**：发送后立即删除缓存文件
 
 ### 2. 自动打包机制
 
@@ -251,10 +274,37 @@ AstrBot插件主类：
 ### 4. 错误处理机制
 
 1. **解析失败**：显示 "解析失败：{失败原因}\n原始链接：{url}"
-2. **网络错误**：重试机制（Twitter API 和媒体下载）
-3. **文件清理**：即使发生异常也会清理文件
+2. **缓存目录无效**：如果缓存目录不可用，返回"本地缓存路径无效"错误
+3. **网络错误**：重试机制（Twitter API 和媒体下载）
+4. **文件清理**：即使发生异常或发送失败也会清理文件
+5. **媒体大小检查**：支持视频和图片的大小检查，超过限制的媒体将被跳过
 
-### 5. 节点构建机制
+### 5. 预先下载机制
+
+当 `pre_download_all_media=True` 时：
+
+1. **优先检查**：解析器在处理媒体时，优先检查预下载开关，避免重复下载
+2. **并发下载**：所有媒体文件（视频和图片）将并发下载到缓存目录
+3. **并发控制**：使用 `max_concurrent_downloads` 控制同时下载的媒体数量（默认3，建议3-5）
+4. **避免重复**：
+   - 如果开启预下载，直接使用预下载方法，跳过原有的下载逻辑
+   - 如果未开启预下载，使用原有逻辑（大媒体下载到缓存，小媒体使用URL或临时文件）
+5. **提高成功率**：使用本地路径发送，可以提高发送成功率
+6. **减少总时间**：并发下载可以减少总下载时间
+7. **磁盘占用**：会短时间增加磁盘占用
+
+**工作流程**：
+
+- **图片图集**：
+  - 开启预下载：直接并发下载所有图片到缓存目录
+  - 未开启预下载：大图片下载到缓存，小图片下载到临时文件
+
+- **视频**：
+  - 大视频（超过阈值）：必须下载到缓存目录（无论是否开启预下载）
+  - 非大视频 + 开启预下载：下载到缓存目录
+  - 非大视频 + 未开启预下载：使用URL发送
+
+### 6. 节点构建机制
 
 所有解析器返回扁平化的节点结构：
 
@@ -363,10 +413,12 @@ AstrBot插件主类：
 4. **灵活配置**：可以按需启用/禁用解析器
 5. **代码复用**：基类提供通用功能
 6. **并行解析**：多个链接并行解析，提高效率
-7. **大视频处理**：自动处理大视频，避免消息适配器限制
-8. **文件管理**：自动清理临时文件，节省磁盘空间
-9. **错误恢复**：完善的错误处理和重试机制
-10. **平台兼容**：支持多种消息平台和流媒体平台
+7. **大媒体处理**：自动处理大媒体（视频和图片），避免消息适配器限制
+8. **预先下载**：支持预先下载所有媒体到本地，提高发送成功率，减少总下载时间
+9. **避免重复**：优先检查预下载开关，避免重复下载媒体文件
+10. **文件管理**：自动清理临时文件，节省磁盘空间
+11. **错误恢复**：完善的错误处理和重试机制
+12. **平台兼容**：支持多种消息平台和流媒体平台
 
 ## 技术细节
 
@@ -384,17 +436,25 @@ AstrBot插件主类：
 - **plain_result**: 发送纯文本消息
 - **Nodes**: 发送转发消息集合
 
-### 3. 视频大小检测
+### 3. 媒体大小检测
 
+- 支持视频和图片大小检测
 - 使用 HEAD 请求获取 Content-Length 或 Content-Range
 - 部分平台需要特殊的请求头（如 Referer）
 - 支持 Range 请求作为备选方案
+- 超过 `max_media_size_mb` 的媒体将被跳过
+- 超过 `large_media_threshold_mb` 的媒体将下载到缓存目录
 
 ### 4. 文件下载
 
 - 使用 aiohttp 异步下载
 - 支持代理（Twitter）
 - 支持重试机制（Twitter）
+- 支持并发下载（预先下载功能）
+  - 优先检查预下载开关，避免重复下载
+  - 使用 `max_concurrent_downloads` 控制并发数
+  - 所有媒体（视频和图片）并发下载到缓存目录
+- 支持缓存目录可用性检查
 - 下载后立即刷新到磁盘（run_local.py）
 
 ### 5. 并发控制
@@ -402,6 +462,7 @@ AstrBot插件主类：
 - 使用 asyncio.Semaphore 控制并发数
 - 使用 asyncio.gather 并行解析多个链接
 - 使用 asyncio.ClientSession 管理 HTTP 连接
+- 预先下载功能使用独立的并发控制（`max_concurrent_downloads`）
 
 ## 测试
 
@@ -427,7 +488,8 @@ proxy_url = "http://127.0.0.1:7890"  # 或 "socks5://127.0.0.1:1080"
 
 1. 微信平台不支持转发消息集合，需要禁用 `is_auto_pack`
 2. Twitter 视频需要下载到缓存目录，无法直接通过 URL 发送
-3. 大视频阈值不能超过消息适配器的硬性限制（100MB）
+3. 大媒体阈值不能超过消息适配器的硬性限制（100MB）
+4. 预先下载功能需要有效的缓存目录，如果缓存目录不可用，预下载功能将不会生效
 
 ## 未来改进
 

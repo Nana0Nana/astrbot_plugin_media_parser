@@ -24,14 +24,19 @@ class VideoParserPlugin(Star):
         trigger_settings = config.get("trigger_settings", {})
         self.is_auto_parse = trigger_settings.get("is_auto_parse", True)
         self.trigger_keywords = trigger_settings.get("trigger_keywords", ["视频解析", "解析视频"])
-        video_size_settings = config.get("video_size_settings", {})
-        max_video_size_mb = video_size_settings.get("max_video_size_mb", 0.0)
-        large_video_threshold_mb = video_size_settings.get("large_video_threshold_mb", 100.0)
-        if large_video_threshold_mb > 0:
-            large_video_threshold_mb = min(large_video_threshold_mb, 100.0)
-        self.large_video_threshold_mb = large_video_threshold_mb
-        cache_dir = video_size_settings.get("cache_dir", "/app/sharedFolder/video_parser/cache")
-        os.makedirs(cache_dir, exist_ok=True)
+        media_size_settings = config.get("media_size_settings", {})
+        max_media_size_mb = media_size_settings.get("max_media_size_mb", 0.0)
+        large_media_threshold_mb = media_size_settings.get("large_media_threshold_mb", 100.0)
+        if large_media_threshold_mb > 0:
+            large_media_threshold_mb = min(large_media_threshold_mb, 100.0)
+        self.large_media_threshold_mb = large_media_threshold_mb
+        download_settings = config.get("download_settings", {})
+        cache_dir = download_settings.get("cache_dir", "/app/sharedFolder/video_parser/cache")
+        pre_download_all_media = download_settings.get("pre_download_all_media", False)
+        max_concurrent_downloads = download_settings.get("max_concurrent_downloads", 3)
+        self.cache_dir_available = self._check_cache_dir_available(cache_dir)
+        if self.cache_dir_available:
+            os.makedirs(cache_dir, exist_ok=True)
         parser_enable_settings = config.get("parser_enable_settings", {})
         enable_bilibili = parser_enable_settings.get("enable_bilibili", True)
         enable_douyin = parser_enable_settings.get("enable_douyin", True)
@@ -42,22 +47,65 @@ class VideoParserPlugin(Star):
         proxy_url = twitter_proxy_settings.get("twitter_proxy_url", "")
         parsers = []
         if enable_bilibili:
-            parsers.append(BilibiliParser(max_video_size_mb=max_video_size_mb, large_video_threshold_mb=large_video_threshold_mb, cache_dir=cache_dir))
+            parsers.append(BilibiliParser(
+                max_media_size_mb=max_media_size_mb,
+                large_media_threshold_mb=large_media_threshold_mb,
+                cache_dir=cache_dir,
+                pre_download_all_media=pre_download_all_media,
+                max_concurrent_downloads=max_concurrent_downloads
+            ))
         if enable_douyin:
-            parsers.append(DouyinParser(max_video_size_mb=max_video_size_mb, large_video_threshold_mb=large_video_threshold_mb, cache_dir=cache_dir))
+            parsers.append(DouyinParser(
+                max_media_size_mb=max_media_size_mb,
+                large_media_threshold_mb=large_media_threshold_mb,
+                cache_dir=cache_dir,
+                pre_download_all_media=pre_download_all_media,
+                max_concurrent_downloads=max_concurrent_downloads
+            ))
         if enable_twitter:
             parsers.append(TwitterParser(
-                max_video_size_mb=max_video_size_mb,
-                large_video_threshold_mb=large_video_threshold_mb,
+                max_media_size_mb=max_media_size_mb,
+                large_media_threshold_mb=large_media_threshold_mb,
                 use_proxy=use_proxy,
                 proxy_url=proxy_url,
-                cache_dir=cache_dir
+                cache_dir=cache_dir,
+                pre_download_all_media=pre_download_all_media,
+                max_concurrent_downloads=max_concurrent_downloads
             ))
         if enable_kuaishou:
-            parsers.append(KuaishouParser(max_video_size_mb=max_video_size_mb, large_video_threshold_mb=large_video_threshold_mb, cache_dir=cache_dir))
+            parsers.append(KuaishouParser(
+                max_media_size_mb=max_media_size_mb,
+                large_media_threshold_mb=large_media_threshold_mb,
+                cache_dir=cache_dir,
+                pre_download_all_media=pre_download_all_media,
+                max_concurrent_downloads=max_concurrent_downloads
+            ))
         if not parsers:
             raise ValueError("至少需要启用一个视频解析器。请检查配置中的 parser_enable_settings 设置。")
         self.parser_manager = ParserManager(parsers)
+
+    def _check_cache_dir_available(self, cache_dir: str) -> bool:
+        """
+        检查缓存目录是否可用（可写）
+        Args:
+            cache_dir: 缓存目录路径
+        Returns:
+            bool: 如果目录可用返回True，否则返回False
+        """
+        if not cache_dir:
+            return False
+        try:
+            os.makedirs(cache_dir, exist_ok=True)
+            test_file = os.path.join(cache_dir, ".test_write")
+            try:
+                with open(test_file, 'w') as f:
+                    f.write("test")
+                os.unlink(test_file)
+                return True
+            except Exception:
+                return False
+        except Exception:
+            return False
 
     async def terminate(self):
         """
@@ -114,6 +162,8 @@ class VideoParserPlugin(Star):
         """
         if temp_files:
             self._cleanup_files(temp_files)
+        if video_files:
+            self._cleanup_files(video_files)
 
     def _is_pure_image_gallery(self, nodes: list) -> bool:
         """
@@ -170,7 +220,12 @@ class VideoParserPlugin(Star):
                 large_video_link_nodes = [meta['link_nodes'] for meta in large_video_metadata]
                 if normal_link_nodes:
                     flat_nodes = []
+                    normal_video_files_to_cleanup = []
                     for link_idx, link_nodes in enumerate(normal_link_nodes):
+                        if link_idx < len(normal_metadata):
+                            link_video_files = normal_metadata[link_idx].get('video_files', [])
+                            if link_video_files:
+                                normal_video_files_to_cleanup.extend(link_video_files)
                         if self._is_pure_image_gallery(link_nodes):
                             texts = [node for node in link_nodes if isinstance(node, Plain)]
                             images = [node for node in link_nodes if isinstance(node, Image)]
@@ -185,44 +240,58 @@ class VideoParserPlugin(Star):
                         if link_idx < len(normal_link_nodes) - 1:
                             flat_nodes.append(Node(name=sender_name, uin=sender_id, content=[Plain(separator)]))
                     if flat_nodes:
-                        await event.send(event.chain_result([Nodes(flat_nodes)]))
+                        try:
+                            await event.send(event.chain_result([Nodes(flat_nodes)]))
+                        finally:
+                            # 确保即使发送失败也清理文件
+                            if normal_video_files_to_cleanup:
+                                self._cleanup_files(normal_video_files_to_cleanup)
                 if large_video_link_nodes:
-                    threshold_mb = int(self.large_video_threshold_mb) if self.large_video_threshold_mb > 0 else 50
-                    notice_text = f"⚠️ 链接中包含超过{threshold_mb}MB的视频时将单独发送所有媒体"
+                    threshold_mb = int(self.large_media_threshold_mb) if self.large_media_threshold_mb > 0 else 50
+                    notice_text = f"⚠️ 链接中包含超过{threshold_mb}MB的媒体时将单独发送所有媒体"
                     await event.send(event.plain_result(notice_text))
                     for link_idx, link_nodes in enumerate(large_video_link_nodes):
-                        for node in link_nodes:
-                            if node is not None:
-                                await event.send(event.chain_result([node]))
+                        link_video_files = []
                         if link_idx < len(large_video_metadata):
                             link_video_files = large_video_metadata[link_idx].get('video_files', [])
+                        try:
+                            for node in link_nodes:
+                                if node is not None:
+                                    try:
+                                        await event.send(event.chain_result([node]))
+                                    except Exception:
+                                        pass
+                        finally:
+                            # 确保即使发送失败也清理文件
                             if link_video_files:
                                 self._cleanup_files(link_video_files)
                         if link_idx < len(large_video_link_nodes) - 1:
                             await event.send(event.plain_result(separator))
-                for metadata in normal_metadata:
-                    link_video_files = metadata.get('video_files', [])
-                    if link_video_files:
-                        self._cleanup_files(link_video_files)
             else:
                 for link_idx, (link_nodes, metadata) in enumerate(zip(all_link_nodes, link_metadata)):
-                    if self._is_pure_image_gallery(link_nodes):
-                        texts = [node for node in link_nodes if isinstance(node, Plain)]
-                        images = [node for node in link_nodes if isinstance(node, Image)]
-                        for text in texts:
-                            await event.send(event.chain_result([text]))
-                        if images:
-                            await event.send(event.chain_result(images))
-                    else:
-                        for node in link_nodes:
-                            if node is not None:
-                                await event.send(event.chain_result([node]))
                     link_video_files = metadata.get('video_files', [])
-                    if link_video_files:
-                        self._cleanup_files(link_video_files)
+                    try:
+                        if self._is_pure_image_gallery(link_nodes):
+                            texts = [node for node in link_nodes if isinstance(node, Plain)]
+                            images = [node for node in link_nodes if isinstance(node, Image)]
+                            for text in texts:
+                                await event.send(event.chain_result([text]))
+                            if images:
+                                await event.send(event.chain_result(images))
+                        else:
+                            for node in link_nodes:
+                                if node is not None:
+                                    try:
+                                        await event.send(event.chain_result([node]))
+                                    except Exception:
+                                        pass
+                    finally:
+                        # 确保即使发送失败也清理文件
+                        if link_video_files:
+                            self._cleanup_files(link_video_files)
                     if link_idx < len(all_link_nodes) - 1:
                         await event.send(event.plain_result(separator))
             self._cleanup_all_files(temp_files, video_files)
-        except Exception:
+        except Exception as e:
             self._cleanup_all_files(temp_files, video_files)
             raise

@@ -22,27 +22,45 @@
             }
         }
     },
-    "video_size_settings": {
-        "description": "视频大小设置",
+    "media_size_settings": {
+        "description": "媒体大小设置",
         "type": "object",
         "items": {
-            "max_video_size_mb": {
-                "description": "最大允许发送的视频大小(MB)",
+            "max_media_size_mb": {
+                "description": "最大允许发送的媒体大小(MB)",
                 "type": "float",
-                "hint": "超过此大小的视频将被跳过，不下载也不发送。设置为0表示不限制",
+                "hint": "超过此大小的媒体（视频和图片）将被跳过，不下载也不发送。设置为0表示不限制",
                 "default": 0.0
             },
-            "large_video_threshold_mb": {
-                "description": "大视频阈值(MB)",
+            "large_media_threshold_mb": {
+                "description": "大媒体阈值(MB)",
                 "type": "float",
-                "hint": "当视频大小超过此阈值时，将单独发送而不包含在转发消息集合中。不能超过消息适配器100MB硬性阈值。设置为0表示不限制",
+                "hint": "当媒体大小（视频和图片）超过此阈值时，将下载到缓存目录。媒体会单独发送而不包含在转发消息集合中。不能超过消息适配器100MB硬性阈值。设置为0表示不限制",
                 "default": 100.0
-            },
+            }
+        }
+    },
+    "download_settings": {
+        "description": "下载和缓存设置",
+        "type": "object",
+        "items": {
             "cache_dir": {
-                "description": "视频缓存目录",
+                "description": "媒体缓存目录",
                 "type": "string",
-                "hint": "视频文件缓存目录，用于Twitter视频和所有超过阈值的大视频（例如：/app/sharedFolder/video_parser/cache）",
+                "hint": "媒体文件缓存目录，用于Twitter视频和所有超过阈值的大媒体（视频和图片）",
                 "default": "/app/sharedFolder/video_parser/cache"
+            },
+            "pre_download_all_media": {
+                "description": "是否预先下载所有媒体到本地",
+                "type": "bool",
+                "hint": "启用后，所有媒体文件将并发下载到缓存目录，发送时使用本地路径。可以提高发送成功率，减少总下载时间，但会短时间增加磁盘占用",
+                "default": false
+            },
+            "max_concurrent_downloads": {
+                "description": "最大并发下载数",
+                "type": "int",
+                "hint": "当启用预先下载所有媒体到本地时，同时下载的媒体文件数量上限。建议值：3-5",
+                "default": 3
             }
         }
     },

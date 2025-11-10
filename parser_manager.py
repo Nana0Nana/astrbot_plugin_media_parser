@@ -2,6 +2,7 @@
 from typing import List, Dict, Any, Optional, Tuple
 import asyncio
 import aiohttp
+import os
 from .parsers.base_parser import BaseVideoParser
 
 
@@ -152,6 +153,8 @@ class ParserManager:
                                 failure_reason = error_msg.replace("解析失败：", "", 1)
                             else:
                                 failure_reason = error_msg
+                            if "本地缓存路径无效" in failure_reason or "cache_dir" in failure_reason.lower():
+                                failure_reason = "本地缓存路径无效"
                         else:
                             failure_reason = "未知错误"
                         failure_text = f"解析失败：{failure_reason}\n原始链接：{url}"
@@ -194,9 +197,28 @@ class ParserManager:
                     if not link_has_large_video:
                         normal_link_count += 1
             if not all_link_nodes:
+                # 如果没有节点，清理已收集的文件
+                self._cleanup_files_list(temp_files + video_files)
                 return None
             return (all_link_nodes, link_metadata, temp_files, video_files, normal_link_count)
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError):
+            # 发生异常，清理已收集的文件
+            self._cleanup_files_list(temp_files + video_files)
             return None
         except Exception:
+            # 发生异常，清理已收集的文件
+            self._cleanup_files_list(temp_files + video_files)
             return None
+    
+    def _cleanup_files_list(self, file_paths: list):
+        """
+        清理文件列表
+        Args:
+            file_paths: 文件路径列表
+        """
+        for file_path in file_paths:
+            if file_path and os.path.exists(file_path):
+                try:
+                    os.unlink(file_path)
+                except Exception:
+                    pass

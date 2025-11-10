@@ -1,20 +1,21 @@
 # -*- coding: utf-8 -*-
-import aiohttp
 import asyncio
-import re
 import json
-import tempfile
 import os
+import re
 from datetime import datetime
 from typing import Optional, Dict, Any, List
+
+import aiohttp
+
 from .base_parser import BaseVideoParser
 
 
 class DouyinParser(BaseVideoParser):
     """抖音视频解析器"""
 
-    def __init__(self, max_video_size_mb: float = 0.0, large_video_threshold_mb: float = 50.0, cache_dir: str = "/app/sharedFolder/video_parser/cache"):
-        super().__init__("抖音", max_video_size_mb, large_video_threshold_mb, cache_dir)
+    def __init__(self, max_media_size_mb: float = 0.0, large_media_threshold_mb: float = 50.0, cache_dir: str = "/app/sharedFolder/video_parser/cache", pre_download_all_media: bool = False, max_concurrent_downloads: int = 3):
+        super().__init__("抖音", max_media_size_mb, large_media_threshold_mb, cache_dir, pre_download_all_media, max_concurrent_downloads)
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Linux; Android 8.0.0; SM-G955U Build/R16NW) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36',
             'Referer': 'https://www.douyin.com/?is_from_mobile_home=1&recommend=1'
@@ -22,7 +23,13 @@ class DouyinParser(BaseVideoParser):
         self.semaphore = asyncio.Semaphore(10)
 
     def can_parse(self, url: str) -> bool:
-        """判断是否可以解析此URL"""
+        """
+        判断是否可以解析此URL
+        Args:
+            url: 视频链接
+        Returns:
+            bool: 如果可以解析返回True，否则返回False
+        """
         if not url:
             return False
         if 'v.douyin.com' in url or 'douyin.com' in url:
@@ -30,7 +37,13 @@ class DouyinParser(BaseVideoParser):
         return False
 
     def extract_links(self, text: str) -> List[str]:
-        """从文本中提取抖音链接"""
+        """
+        从文本中提取抖音链接
+        Args:
+            text: 输入文本
+        Returns:
+            List[str]: 抖音链接列表
+        """
         result_links = []
         seen_ids = set()
         mobile_pattern = r'https?://v\.douyin\.com/[^\s]+'
@@ -61,8 +74,27 @@ class DouyinParser(BaseVideoParser):
                     result_links.append(standardized_url)
         return result_links
 
+    def _extract_media_id(self, url: str) -> str:
+        """
+        从URL中提取媒体ID
+        Args:
+            url: 抖音URL
+        Returns:
+            str: 媒体ID，如果无法提取则返回 "douyin"
+        """
+        video_id_match = re.search(r'/note/(\d+)', url) or \
+                         re.search(r'/video/(\d+)', url) or \
+                         re.search(r'(\d{19})', url)
+        return video_id_match.group(1) if video_id_match else "douyin"
+
     def extract_router_data(self, text):
-        """从HTML中提取ROUTER_DATA"""
+        """
+        从HTML中提取ROUTER_DATA
+        Args:
+            text: HTML文本
+        Returns:
+            Optional[str]: ROUTER_DATA JSON字符串，如果未找到则返回None
+        """
         start_flag = 'window._ROUTER_DATA = '
         start_idx = text.find(start_flag)
         if start_idx == -1:
@@ -83,7 +115,15 @@ class DouyinParser(BaseVideoParser):
         return None
 
     async def fetch_video_info(self, session, item_id, is_note=False):
-        """获取视频/笔记信息"""
+        """
+        获取视频/笔记信息
+        Args:
+            session: aiohttp会话
+            item_id: 视频/笔记ID
+            is_note: 是否为笔记
+        Returns:
+            Optional[Dict[str, Any]]: 视频/笔记信息字典，如果解析失败则返回None
+        """
         if is_note:
             url = f'https://www.iesdouyin.com/share/note/{item_id}/'
         else:
@@ -176,7 +216,14 @@ class DouyinParser(BaseVideoParser):
             return None
 
     async def get_redirected_url(self, session, url):
-        """获取重定向后的URL"""
+        """
+        获取重定向后的URL
+        Args:
+            session: aiohttp会话
+            url: 原始URL
+        Returns:
+            str: 重定向后的URL
+        """
         async with session.head(url, allow_redirects=True) as response:
             return str(response.url)
 
@@ -227,70 +274,165 @@ class DouyinParser(BaseVideoParser):
             pass
         return None
 
-    async def _download_image_to_file(self, session: aiohttp.ClientSession, image_url: str, image_index: int = 0, referer: str = None) -> Optional[str]:
+    async def _download_image_to_file(self, session: aiohttp.ClientSession, image_url: str, index: int = 0, referer: str = None) -> Optional[str]:
         """
-        下载图片到临时文件
+        下载图片到临时文件（使用基类方法）
         Args:
             session: aiohttp 会话
             image_url: 图片URL
-            image_index: 图片索引
+            index: 图片索引
             referer: Referer URL，如果提供则使用，否则使用默认的抖音主页
         Returns:
-            临时文件路径，失败返回 None
+            Optional[str]: 临时文件路径，失败返回 None
         """
-        try:
-            referer_url = referer if referer else 'https://www.douyin.com/'
-            image_headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': referer_url,
-                'Origin': 'https://www.douyin.com',
-                'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-                'Accept-Language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Connection': 'keep-alive',
-                'Sec-Fetch-Dest': 'image',
-                'Sec-Fetch-Mode': 'no-cors',
-                'Sec-Fetch-Site': 'same-site',
-                'Cache-Control': 'no-cache',
-                'Pragma': 'no-cache',
-            }
-            async with session.get(
-                image_url,
-                headers=image_headers,
-                timeout=aiohttp.ClientTimeout(total=30)
-            ) as response:
-                response.raise_for_status()
-                content = await response.read()
-                content_type = response.headers.get('Content-Type', '')
-                if 'jpeg' in content_type or 'jpg' in content_type:
-                    suffix = '.jpg'
-                elif 'png' in content_type:
-                    suffix = '.png'
-                elif 'webp' in content_type:
-                    suffix = '.webp'
-                elif 'gif' in content_type:
-                    suffix = '.gif'
-                else:
-                    if '.jpg' in image_url.lower() or '.jpeg' in image_url.lower():
-                        suffix = '.jpg'
-                    elif '.png' in image_url.lower():
-                        suffix = '.png'
-                    elif '.webp' in image_url.lower():
-                        suffix = '.webp'
-                    elif '.gif' in image_url.lower():
-                        suffix = '.gif'
+        douyin_headers = {
+            'Origin': 'https://www.douyin.com',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Sec-Fetch-Dest': 'image',
+            'Sec-Fetch-Mode': 'no-cors',
+            'Sec-Fetch-Site': 'same-site',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+        }
+        return await super()._download_image_to_file(
+            session, image_url, index, douyin_headers, referer, 'https://www.douyin.com/'
+        )
+
+    async def _download_image_with_retry(
+        self,
+        session: aiohttp.ClientSession,
+        image_url: str,
+        image_id: str,
+        index: int = 0,
+        referer: str = None,
+        max_retries: int = 2,
+        retry_delay: float = 0.5,
+        to_cache: bool = False
+    ) -> Optional[str]:
+        """
+        下载图片（带重试机制，类似于推特解析器）
+        Args:
+            session: aiohttp 会话
+            image_url: 图片URL
+            image_id: 图片ID
+            index: 图片索引
+            referer: Referer URL，如果提供则使用，否则使用默认的抖音主页
+            max_retries: 最大重试次数，默认2次
+            retry_delay: 重试延迟（秒），默认0.5秒，使用指数退避
+            to_cache: 是否下载到缓存目录，False则下载到临时文件
+        Returns:
+            Optional[str]: 文件路径，失败返回 None
+        """
+        import tempfile
+        douyin_headers = {
+            'Origin': 'https://www.douyin.com',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Sec-Fetch-Dest': 'image',
+            'Sec-Fetch-Mode': 'no-cors',
+            'Sec-Fetch-Site': 'same-site',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 8.0.0; SM-G955U Build/R16NW) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36',
+            'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+        }
+        if referer:
+            douyin_headers['Referer'] = referer
+        else:
+            douyin_headers['Referer'] = 'https://www.douyin.com/'
+
+        for attempt in range(max_retries + 1):
+            try:
+                async with session.get(
+                    image_url,
+                    headers=douyin_headers,
+                    timeout=aiohttp.ClientTimeout(total=60)
+                ) as response:
+                    response.raise_for_status()
+                    content = await response.read()
+                    content_type = response.headers.get('Content-Type', '')
+                    suffix = self._get_image_suffix(content_type, image_url)
+                    
+                    if to_cache:
+                        # 下载到缓存目录
+                        if not self.cache_dir_available or not self.cache_dir:
+                            return None
+                        filename = f"{image_id}_{index}{suffix}"
+                        file_path = os.path.join(self.cache_dir, filename)
+                        if os.path.exists(file_path):
+                            return os.path.normpath(file_path)
+                        with open(file_path, 'wb') as f:
+                            f.write(content)
+                        return os.path.normpath(file_path)
                     else:
-                        suffix = '.jpg'
-                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
-                    temp_file.write(content)
-                    file_path = os.path.normpath(temp_file.name)
-                    return file_path
-        except Exception:
+                        # 下载到临时文件
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+                            temp_file.write(content)
+                            file_path = os.path.normpath(temp_file.name)
+                            return file_path
+            except (aiohttp.ClientError, asyncio.TimeoutError, aiohttp.ServerTimeoutError) as e:
+                if attempt < max_retries:
+                    delay = retry_delay * (2 ** attempt)
+                    await asyncio.sleep(delay)
+                    continue
+                return None
+            except Exception:
+                return None
+
+        return None
+
+    async def _download_large_media_to_cache(self, session: aiohttp.ClientSession, media_url: str, media_id: str, index: int = 0, headers: dict = None, is_video: bool = True, referer: str = None, default_referer: str = None, proxy: str = None) -> Optional[str]:
+        """
+        下载大媒体到缓存目录（重写基类方法，为图片添加重试逻辑）
+        Args:
+            session: aiohttp会话
+            media_url: 媒体URL
+            media_id: 媒体ID
+            index: 索引
+            headers: 自定义请求头（如果提供，会与默认请求头合并）
+            is_video: 是否为视频（True为视频，False为图片）
+            referer: Referer URL，如果提供则使用
+            default_referer: 默认 Referer URL（如果 referer 未提供）
+            proxy: 代理地址（可选）
+        Returns:
+            Optional[str]: 文件路径或None
+        """
+        if not self.cache_dir_available or not self.cache_dir:
             return None
+        
+        # 对于图片，使用带重试的下载方法
+        if not is_video:
+            referer_url = referer if referer else (default_referer or 'https://www.douyin.com/')
+            return await self._download_image_with_retry(
+                session,
+                media_url,
+                media_id,
+                index,
+                referer_url,
+                max_retries=2,
+                retry_delay=0.5,
+                to_cache=True
+            )
+        
+        # 对于视频，使用基类方法（保持原有逻辑）
+        return await super()._download_large_media_to_cache(
+            session, media_url, media_id, index, headers, is_video, referer, default_referer, proxy
+        )
 
     async def parse(self, session: aiohttp.ClientSession, url: str) -> Optional[Dict[str, Any]]:
-        """解析单个抖音链接"""
+        """
+        解析单个抖音链接
+        Args:
+            session: aiohttp会话
+            url: 抖音链接
+        Returns:
+            Optional[Dict[str, Any]]: 解析结果字典，如果解析失败则返回None
+        """
         async with self.semaphore:
+            # 跟踪所有下载的文件，以便在异常时清理
+            downloaded_files = []
             try:
                 redirected_url = await self.get_redirected_url(session, url)
                 is_note = '/note/' in redirected_url or '/note/' in url
@@ -322,32 +464,151 @@ class DouyinParser(BaseVideoParser):
                 images = result.get('images', [])
                 image_url_lists = result.get('image_url_lists', [])
                 if is_gallery and images:
+                    if not self.cache_dir_available:
+                        raise RuntimeError("解析失败：本地缓存路径无效")
                     image_files = []
-                    if is_note and note_id:
-                        page_referer = f"https://www.douyin.com/note/{note_id}"
-                    else:
-                        page_referer = url
-                    for idx, primary_url in enumerate(images):
-                        if not primary_url or not isinstance(primary_url, str) or not primary_url.startswith(('http://', 'https://')):
-                            continue
-                        backup_urls = []
-                        if idx < len(image_url_lists) and image_url_lists[idx]:
-                            backup_urls = image_url_lists[idx][1:]
-                        image_file = await self._download_image_to_file(session, primary_url, image_index=idx, referer=page_referer)
-                        if not image_file and backup_urls:
-                            for backup_url in backup_urls:
-                                image_file = await self._download_image_to_file(session, backup_url, image_index=idx, referer=page_referer)
-                                if image_file:
-                                    break
-                        if image_file:
-                            image_files.append(image_file)
-                    if not image_files:
-                        return None
                     if is_note and note_id:
                         display_url = f"https://www.douyin.com/note/{note_id}"
                     else:
                         display_url = url
-                    return {
+                    # 优先检查是否开启预下载，避免重复下载
+                    if self.pre_download_all_media and self.cache_dir_available:
+                        if is_note and note_id:
+                            page_referer = f"https://www.douyin.com/note/{note_id}"
+                        else:
+                            page_referer = url
+                        media_items = []
+                        for idx, img_url in enumerate(images):
+                            if img_url and isinstance(img_url, str) and img_url.startswith(('http://', 'https://')):
+                                image_size = await self.get_image_size(img_url, session, headers=self.headers)
+                                if self.max_media_size_mb > 0 and image_size is not None:
+                                    if image_size > self.max_media_size_mb:
+                                        continue
+                                image_id = self._extract_media_id(url)
+                                # 添加主URL
+                                media_items.append({
+                                    'url': img_url,
+                                    'media_id': image_id,
+                                    'index': idx,
+                                    'is_video': False,
+                                    'headers': self.headers,
+                                    'backup_urls': image_url_lists[idx][1:] if idx < len(image_url_lists) and image_url_lists[idx] else [],
+                                    'referer': page_referer,
+                                    'default_referer': 'https://www.douyin.com/'
+                                })
+                        if media_items:
+                            # 先尝试预下载主URL
+                            download_results = await self._pre_download_media(session, media_items, self.headers)
+                            # 创建索引到媒体项的映射，以便正确匹配结果
+                            index_to_item = {item.get('index', idx): item for idx, item in enumerate(media_items)}
+                            # 按照 index 排序，确保按照原始顺序处理
+                            download_results_sorted = sorted(download_results, key=lambda x: x.get('index', 0))
+                            # 对于失败的下载，尝试备用URL
+                            for download_result in download_results_sorted:
+                                result_index = download_result.get('index', -1)
+                                if download_result.get('success') and download_result.get('file_path'):
+                                    file_path = download_result['file_path']
+                                    image_files.append(file_path)
+                                    downloaded_files.append(file_path)
+                                else:
+                                    # 主URL下载失败，尝试备用URL（使用带重试的下载方法）
+                                    # 使用 index 字段来匹配对应的媒体项
+                                    item = index_to_item.get(result_index)
+                                    if item:
+                                        backup_urls = item.get('backup_urls', [])
+                                        if backup_urls:
+                                            image_id = self._extract_media_id(url)
+                                            cache_path = None
+                                            # 尝试每个备用URL，使用带重试的下载方法
+                                            for backup_url in backup_urls:
+                                                if not backup_url or not isinstance(backup_url, str):
+                                                    continue
+                                                # 尝试下载到缓存目录
+                                                cache_path = await self._download_image_with_retry(
+                                                    session,
+                                                    backup_url,
+                                                    image_id,
+                                                    item['index'],
+                                                    item.get('referer'),
+                                                    max_retries=2,
+                                                    retry_delay=0.5,
+                                                    to_cache=True
+                                                )
+                                                if cache_path:
+                                                    downloaded_files.append(cache_path)
+                                                    break
+                                            if cache_path:
+                                                image_files.append(cache_path)
+                            if image_files:
+                                images = []
+                    else:
+                        # 未开启预下载，使用原有逻辑
+                        if is_note and note_id:
+                            page_referer = f"https://www.douyin.com/note/{note_id}"
+                        else:
+                            page_referer = url
+                        for idx, primary_url in enumerate(images):
+                            if not primary_url or not isinstance(primary_url, str) or not primary_url.startswith(('http://', 'https://')):
+                                continue
+                            image_size = await self.get_image_size(primary_url, session, headers=self.headers)
+                            if self.max_media_size_mb > 0 and image_size is not None:
+                                if image_size > self.max_media_size_mb:
+                                    continue
+                            backup_urls = []
+                            if idx < len(image_url_lists) and image_url_lists[idx]:
+                                backup_urls = image_url_lists[idx][1:]
+                            image_file = None
+                            if self.large_media_threshold_mb > 0 and image_size is not None and image_size > self.large_media_threshold_mb:
+                                if self.max_media_size_mb <= 0 or image_size <= self.max_media_size_mb:
+                                    image_id = self._extract_media_id(url)
+                                    # 先尝试主URL下载到缓存（使用与临时文件下载相同的逻辑）
+                                    image_file = await self._download_large_media_to_cache(
+                                        session,
+                                        primary_url,
+                                        image_id,
+                                        index=idx,
+                                        headers=self.headers,
+                                        is_video=False,
+                                        referer=page_referer,
+                                        default_referer='https://www.douyin.com/'
+                                    )
+                                    # 如果主URL下载到缓存失败，尝试备用URL下载到缓存（使用与临时文件下载相同的逻辑）
+                                    if not image_file and backup_urls:
+                                        for backup_url in backup_urls:
+                                            image_file = await self._download_large_media_to_cache(
+                                                session,
+                                                backup_url,
+                                                image_id,
+                                                index=idx,
+                                                headers=self.headers,
+                                                is_video=False,
+                                                referer=page_referer,
+                                                default_referer='https://www.douyin.com/'
+                                            )
+                                            if image_file:
+                                                downloaded_files.append(image_file)
+                                                break
+                            if not image_file:
+                                # 如果大图片下载到缓存都失败，降级为下载到临时文件（使用带重试的方法）
+                                image_id = self._extract_media_id(url)
+                                image_file = await self._download_image_with_retry(
+                                    session, primary_url, image_id, idx, page_referer, max_retries=2, retry_delay=0.5, to_cache=False
+                                )
+                                if not image_file and backup_urls:
+                                    for backup_url in backup_urls:
+                                        image_file = await self._download_image_with_retry(
+                                            session, backup_url, image_id, idx, page_referer, max_retries=2, retry_delay=0.5, to_cache=False
+                                        )
+                                        if image_file:
+                                            downloaded_files.append(image_file)
+                                            break
+                            if image_file:
+                                image_files.append(image_file)
+                    if not image_files:
+                        # 清理已下载的文件
+                        self._cleanup_files_list(downloaded_files)
+                        return None
+                    parse_result = {
                         "video_url": display_url,
                         "title": result.get('title', ''),
                         "author": result.get('author', result.get('nickname', '')),
@@ -357,28 +618,37 @@ class DouyinParser(BaseVideoParser):
                         "image_files": image_files,
                         "is_gallery": True
                     }
+                    return parse_result
                 video_url = result.get('video_url')
                 if video_url:
                     page_referer = url if not is_note else (f"https://www.douyin.com/note/{note_id}" if note_id else url)
                     video_size = await self.get_video_size(video_url, session, referer=page_referer)
-                    if self.max_video_size_mb > 0 and video_size is not None:
-                        if video_size > self.max_video_size_mb:
+                    if self.max_media_size_mb > 0 and video_size is not None:
+                        if video_size > self.max_media_size_mb:
+                            # 清理已下载的文件
+                            self._cleanup_files_list(downloaded_files)
                             return None
                     has_large_video = False
                     video_file_path = None
-                    if self.large_video_threshold_mb > 0 and video_size is not None and video_size > self.large_video_threshold_mb:
-                        if self.max_video_size_mb <= 0 or video_size <= self.max_video_size_mb:
-                            video_id_match = re.search(r'/video/(\d+)', url)
-                            if not video_id_match:
-                                video_id_match = re.search(r'(\d{19})', url)
-                            video_id = video_id_match.group(1) if video_id_match else "douyin"
-                            video_file_path = await self._download_large_video_to_cache(
+                    if self.large_media_threshold_mb > 0 and video_size is not None and video_size > self.large_media_threshold_mb:
+                        if not self.cache_dir_available:
+                            # 清理已下载的文件
+                            self._cleanup_files_list(downloaded_files)
+                            raise RuntimeError("解析失败：本地缓存路径无效")
+                        if self.max_media_size_mb <= 0 or video_size <= self.max_media_size_mb:
+                            has_large_video = True
+                            video_id = self._extract_media_id(url)
+                            video_file_path = await self._download_large_media_to_cache(
                                 session,
                                 video_url,
                                 video_id,
                                 index=0,
-                                headers=self.headers
+                                headers=self.headers,
+                                is_video=True,
+                                referer=url
                             )
+                            if video_file_path:
+                                downloaded_files.append(video_file_path)
                     parse_result = {
                         "video_url": url,
                         "title": result.get('title', ''),
@@ -390,12 +660,52 @@ class DouyinParser(BaseVideoParser):
                     }
                     if has_large_video:
                         parse_result['force_separate_send'] = True
+                        parse_result['has_large_video'] = True
                         if video_file_path:
                             parse_result['video_files'] = [{'file_path': video_file_path}]
+                    # 预先下载所有媒体
+                    if self.pre_download_all_media and self.cache_dir_available:
+                        media_items = []
+                        if video_url and not has_large_video:
+                            video_id = self._extract_media_id(url)
+                            media_items.append({
+                                'url': video_url,
+                                'media_id': video_id,
+                                'index': 0,
+                                'is_video': True,
+                                'headers': self.headers,
+                                'referer': url
+                            })
+                        if media_items:
+                            download_results = await self._pre_download_media(session, media_items, self.headers)
+                            for download_result in download_results:
+                                if download_result.get('success') and download_result.get('file_path'):
+                                    file_path = download_result['file_path']
+                                    parse_result['video_files'] = [{'file_path': file_path}]
+                                    parse_result['direct_url'] = None
+                                    downloaded_files.append(file_path)
+                                    break
                     return parse_result
+                # 清理已下载的文件
+                self._cleanup_files_list(downloaded_files)
                 return None
             except Exception:
+                # 发生异常，清理所有已下载的文件
+                self._cleanup_files_list(downloaded_files)
                 return None
+    
+    def _cleanup_files_list(self, file_paths: list):
+        """
+        清理文件列表
+        Args:
+            file_paths: 文件路径列表
+        """
+        for file_path in file_paths:
+            if file_path and os.path.exists(file_path):
+                try:
+                    os.unlink(file_path)
+                except Exception:
+                    pass
 
     def build_media_nodes(self, result: Dict[str, Any], sender_name: str, sender_id: Any, is_auto_pack: bool) -> List:
         """
