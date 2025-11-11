@@ -8,6 +8,7 @@ import os
 import importlib.util
 import types
 import re
+import logging
 
 # 获取项目根目录
 _project_root = os.path.dirname(os.path.abspath(__file__))
@@ -17,9 +18,84 @@ if _project_root not in sys.path:
 # 包名称
 _package_name = "astrbot_plugin_video_parser"
 
+# 创建 astrbot 模拟模块
+def _setup_astrbot_mock():
+    """创建 astrbot 模拟模块以支持本地测试"""
+    # 创建 astrbot 模块
+    if "astrbot" not in sys.modules:
+        _astrbot_module = types.ModuleType("astrbot")
+        sys.modules["astrbot"] = _astrbot_module
+    
+    # 创建 astrbot.api 模块
+    if "astrbot.api" not in sys.modules:
+        _astrbot_api_module = types.ModuleType("astrbot.api")
+        sys.modules["astrbot.api"] = _astrbot_api_module
+        setattr(sys.modules["astrbot"], "api", _astrbot_api_module)
+    
+    # 创建 astrbot.api.message_components 模块
+    if "astrbot.api.message_components" not in sys.modules:
+        _message_components_module = types.ModuleType("astrbot.api.message_components")
+        
+        # 定义占位符类
+        class Plain:
+            def __init__(self, text: str):
+                self.text = text
+            def __repr__(self):
+                return f"Plain({self.text!r})"
+        
+        class Image:
+            def __init__(self, url: str = None, file: str = None, **kwargs):
+                self.url = url
+                self.file = file
+                self.__dict__.update(kwargs)
+            def __repr__(self):
+                if self.file:
+                    return f"Image(file={self.file!r})"
+                return f"Image(url={self.url!r})"
+        
+        class Video:
+            def __init__(self, url: str = None, file: str = None, **kwargs):
+                self.url = url
+                self.file = file
+                self.__dict__.update(kwargs)
+            def __repr__(self):
+                if self.file:
+                    return f"Video(file={self.file!r})"
+                return f"Video(url={self.url!r})"
+        
+        class Node:
+            def __init__(self, sender_name: str, sender_id, *components):
+                self.sender_name = sender_name
+                self.sender_id = sender_id
+                self.components = list(components)
+            def __repr__(self):
+                return f"Node(sender={self.sender_name}, components={len(self.components)})"
+        
+        # 将类添加到模块
+        _message_components_module.Plain = Plain
+        _message_components_module.Image = Image
+        _message_components_module.Video = Video
+        _message_components_module.Node = Node
+        
+        sys.modules["astrbot.api.message_components"] = _message_components_module
+        setattr(sys.modules["astrbot.api"], "message_components", _message_components_module)
+    
+    # 创建 astrbot.api.logger 模拟对象
+    if not hasattr(sys.modules["astrbot.api"], "logger"):
+        _logger = logging.getLogger("astrbot.api")
+        _logger.setLevel(logging.INFO)
+        if not _logger.handlers:
+            _handler = logging.StreamHandler()
+            _handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+            _logger.addHandler(_handler)
+        setattr(sys.modules["astrbot.api"], "logger", _logger)
+
 # 创建包模块结构
 def _setup_package_structure():
     """设置包结构以支持相对导入"""
+    # 首先创建 astrbot 模拟模块
+    _setup_astrbot_mock()
+    
     # 创建主包
     if _package_name not in sys.modules:
         _main_package = types.ModuleType(_package_name)
@@ -89,14 +165,22 @@ def _setup_package_structure():
     # 使用 importlib 加载，确保相对导入能够工作
     _parser_manager_file = os.path.join(_project_root, "parser_manager.py")
     if os.path.exists(_parser_manager_file):
+        # 使用完整的模块名来支持相对导入
+        _parser_manager_module_name = f"{_package_name}.parser_manager"
         _parser_manager_spec = importlib.util.spec_from_file_location(
-            "parser_manager", _parser_manager_file
+            _parser_manager_module_name, _parser_manager_file
         )
         _parser_manager_module = importlib.util.module_from_spec(_parser_manager_spec)
         _parser_manager_module.__package__ = _package_name
-        # 确保模块可以访问包
+        # 确保模块可以访问包和子包
         _parser_manager_module.__dict__[_package_name] = sys.modules[_package_name]
+        if _parsers_pkg_name in sys.modules:
+            _parser_manager_module.__dict__["parsers"] = sys.modules[_parsers_pkg_name]
+        sys.modules[_parser_manager_module_name] = _parser_manager_module
+        # 同时注册为 "parser_manager" 以便直接导入
         sys.modules["parser_manager"] = _parser_manager_module
+        # 将 parser_manager 添加到主包
+        setattr(sys.modules[_package_name], "parser_manager", _parser_manager_module)
         _parser_manager_spec.loader.exec_module(_parser_manager_module)
 
 # 设置包结构
