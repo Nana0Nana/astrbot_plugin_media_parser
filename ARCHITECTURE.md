@@ -5,14 +5,28 @@
 ```
 astrbot_plugin_video_parser/
 ├── __init__.py                 # 插件初始化文件
-├── main.py                     # 插件主入口
-├── parser_manager.py           # 解析器管理器
+├── main.py                     # 插件主入口（唯一入口文件）
 ├── _conf_schema.json           # 配置架构定义
 ├── metadata.yaml               # 插件元数据
 ├── requirements.txt            # 依赖列表
 ├── README.md                   # 使用说明
 ├── ARCHITECTURE.md             # 架构说明（本文件）
 ├── run_local.py                # 本地测试脚本
+├── core/                       # 核心模块目录
+│   ├── __init__.py             # 核心模块导出（延迟导入）
+│   ├── config_manager.py       # 配置管理器
+│   ├── constants.py            # 常量定义
+│   ├── exceptions.py           # 异常定义
+│   ├── parser_factory.py       # 解析器工厂
+│   ├── parser_initializer.py   # 解析器初始化器
+│   ├── parser_manager.py       # 解析器管理器
+│   └── parser_registry.py      # 解析器注册表
+├── utils/                      # 工具模块目录
+│   ├── __init__.py             # 工具模块导出
+│   ├── error_handler.py        # 错误处理工具
+│   ├── message_sender.py       # 消息发送器
+│   ├── resource_manager.py     # 资源管理器
+│   └── result_processor.py     # 结果处理器
 └── parsers/                    # 解析器目录
     ├── __init__.py             # 解析器模块导出
     ├── base_parser.py          # 基础解析器抽象类
@@ -63,7 +77,52 @@ astrbot_plugin_video_parser/
   - `pre_download_all_media`: 是否预先下载所有媒体到本地
   - `max_concurrent_downloads`: 最大并发下载数
 
-### 2. ParserManager (parser_manager.py)
+### 2. ConfigManager (core/config_manager.py)
+
+配置管理器，负责：
+
+- 统一解析和管理配置
+- 验证配置的有效性
+- 提供类型安全的配置访问接口
+- 处理配置的默认值和约束
+
+主要属性：
+- `is_auto_pack`: 是否自动打包
+- `is_auto_parse`: 是否自动解析
+- `trigger_keywords`: 触发关键词列表
+- `max_media_size_mb`: 最大媒体大小限制
+- `large_media_threshold_mb`: 大媒体阈值
+- `cache_dir`: 缓存目录路径
+- `pre_download_all_media`: 是否预下载所有媒体
+- `max_concurrent_downloads`: 最大并发下载数
+- `parser_enable_settings`: 解析器启用设置
+- `twitter_proxy_settings`: Twitter代理设置
+
+### 3. ParserRegistry (core/parser_registry.py)
+
+解析器注册表，负责：
+
+- 注册和发现解析器
+- 提供解析器注册装饰器
+- 管理解析器元数据
+
+主要方法：
+- `register()`: 注册解析器（装饰器）
+- `get_parser()`: 根据名称获取解析器类
+- `get_all_parsers()`: 获取所有已注册的解析器
+
+### 4. ParserFactory (core/parser_factory.py)
+
+解析器工厂，负责：
+
+- 根据配置创建解析器实例
+- 管理解析器的初始化顺序
+- 确保解析器已注册
+
+主要方法：
+- `create_parsers()`: 根据配置创建所有启用的解析器实例
+
+### 5. ParserManager (core/parser_manager.py)
 
 解析器管理器，负责：
 
@@ -87,12 +146,67 @@ astrbot_plugin_video_parser/
   - `temp_files`: 临时文件列表（图片文件）
   - `video_files`: 视频文件列表
   - `normal_link_count`: 普通链接数量（用于决定节点组装方式）
-- `_deduplicate_links()`: 对链接进行去重
 - `_execute_parse_tasks()`: 并发执行所有解析任务
 - `_process_parse_result()`: 处理单个解析结果（成功或失败）
 - `_cleanup_files_list()`: 清理文件列表
 
-### 3. 具体解析器 (parsers/)
+### 6. MessageSender (utils/message_sender.py)
+
+消息发送器，负责：
+
+- 将解析结果发送到消息平台
+- 支持打包和非打包两种模式
+- 处理大媒体单独发送逻辑
+- 管理文件清理时机
+
+主要方法：
+- `send_packed_results()`: 发送打包的结果（使用Nodes）
+- `send_unpacked_results()`: 发送非打包的结果（独立发送）
+- `send_large_media_results()`: 发送大媒体结果（单独发送）
+- `_is_pure_image_gallery()`: 判断节点列表是否是纯图片图集
+
+### 7. ResultProcessor (utils/result_processor.py)
+
+结果处理器，负责：
+
+- 处理解析结果
+- 组织消息节点
+- 协调消息发送和资源清理
+
+主要方法：
+- `process_and_send()`: 处理解析结果并发送消息
+- `_get_sender_info()`: 获取发送者信息（名称和ID）
+
+### 8. ResourceManager (utils/resource_manager.py)
+
+资源管理器，负责：
+
+- 统一管理文件资源（临时文件和缓存文件）
+- 使用上下文管理器确保资源自动清理
+- 支持分类管理（临时文件 vs 缓存文件）
+
+主要方法：
+- `register_temp_file()`: 注册临时文件
+- `register_cache_file()`: 注册缓存文件
+- `register_files()`: 批量注册文件
+- `cleanup_temp_files()`: 清理临时文件
+- `cleanup_cache_files()`: 清理缓存文件
+- `cleanup_all()`: 清理所有文件
+
+### 9. error_handler (utils/error_handler.py)
+
+错误处理工具，提供：
+
+- 标准化的错误消息格式化
+- 错误消息规范化处理
+- 解析错误格式化
+
+主要函数：
+- `normalize_error_message()`: 规范化错误消息
+- `format_parse_error()`: 格式化解析错误消息
+- `handle_parse_errors()`: 处理解析错误
+
+### 10. 具体解析器 (parsers/)
 
 每个平台的解析器实现（使用"平台名.py"命名）：
 
@@ -135,48 +249,49 @@ astrbot_plugin_video_parser/
 
 - **ExampleParser** (`example.py`): 示例解析器（用于参考）
 
-### 4. VideoParserPlugin (main.py)
+### 11. VideoParserPlugin (main.py)
 
 AstrBot插件主类：
 
 - 处理消息事件
-- 管理配置（分组配置：触发设置、视频大小设置、解析器启用设置、Twitter代理设置）
-- 初始化解析器和管理器
-- 发送解析结果
-- 处理自动打包逻辑
-- 处理大视频单独发送逻辑
-- 文件清理（临时文件和视频文件）
+- 使用 ConfigManager 统一管理配置
+- 使用 ParserFactory 创建解析器
+- 使用 ParserManager 管理解析器
+- 使用 MessageSender 发送消息
+- 使用 ResultProcessor 处理结果
+- 使用 ResourceManager 管理资源
 
 主要方法：
 - `_check_cache_dir_available()`: 检查缓存目录是否可用（可写）
 - `_should_parse()`: 判断是否应该解析消息
   - 自动解析模式：直接返回 True
   - 手动解析模式：检查触发关键词或平台特定关键词
-- `_cleanup_files()`: 清理文件列表
-- `_cleanup_all_files()`: 清理所有临时文件和视频文件
-- `_is_pure_image_gallery()`: 判断节点列表是否是纯图片图集
-- `_get_sender_info()`: 获取发送者信息（名称和ID）
-- `_send_packed_results()`: 发送打包的结果（使用Nodes）
-- `_send_large_media_results()`: 发送大媒体结果（单独发送）
-- `_send_unpacked_results()`: 发送非打包的结果（独立发送）
+- `_cleanup_files()`: 清理文件列表（兼容旧接口，建议使用ResourceManager）
+- `_cleanup_all_files()`: 清理所有临时文件和视频文件（兼容旧接口，建议使用ResourceManager）
 - `auto_parse()`: 自动解析消息中的视频链接
   - 提取链接
   - 构建节点
-  - 根据 `is_auto_pack` 决定发送方式
-  - 处理大视频单独发送
-  - 清理文件
+  - 使用 ResultProcessor 处理结果并发送
+  - 使用 ResourceManager 管理资源清理
 
-### 5. run_local.py
+### 12. run_local.py
 
 本地测试脚本，用于测试视频链接解析功能：
 
-- 设置虚拟包环境以支持相对导入
-- 创建 astrbot 模拟模块以支持本地测试
+- **在脚本开始时立即设置 astrbot 模拟模块**（在任何导入之前）
+- 动态设置包结构以支持相对导入
+- 创建完整的 astrbot 模拟环境（包括所有需要的模块和类）
+- 使用完整包路径导入项目模块
 - 初始化解析器（所有解析器不使用缓存目录，解析结果只保存在内存中）
 - 解析链接并显示元数据
 - 支持用户选择下载媒体文件到本地
 - 支持代理配置（用于 Twitter 链接）
 - 支持退出选项（输入链接时和询问下载时都可以退出）
+
+**关键特性**：
+- 延迟导入机制：`core/__init__.py` 使用 `__getattr__` 实现延迟导入，避免循环导入
+- 模块加载顺序：按依赖关系顺序加载模块（base_parser → constants/exceptions → utils → core）
+- 完整的 astrbot 模拟：包括 `astrbot.api.event`、`astrbot.api.star`、`astrbot.api.message_components` 等
 
 ## 数据流
 
@@ -185,21 +300,23 @@ AstrBot插件主类：
    ↓
 2. VideoParserPlugin.auto_parse()
    - 检查是否应该解析（_should_parse）
-   - 发送提示消息："视频解析bot为您服务 ٩( 'ω' )و"
+   - 发送提示消息："流媒体解析bot为您服务 ٩( 'ω' )و"
    ↓
 3. ParserManager.extract_all_links() - 提取所有可解析的链接（去重）
    - 按在文本中出现的位置排序
    - 自动去重相同链接
    ↓
-4. ParserManager.build_nodes()
-   - 创建 aiohttp.ClientSession（超时30秒）
-   - 去重链接（_deduplicate_links）
+4. ResultProcessor._get_sender_info() - 获取发送者信息
    ↓
-5. 并行解析所有链接 (asyncio.gather)
+5. ParserManager.build_nodes()
+   - 创建 aiohttp.ClientSession（超时30秒）
+   - 去重链接
+   ↓
+6. 并行解析所有链接 (asyncio.gather)
    - 使用 _execute_parse_tasks() 并发执行
    - 每个链接独立解析，互不影响
    ↓ (对每个链接)
-6. 具体解析器.parse()
+7. 具体解析器.parse()
    - 检测媒体大小（视频和图片）
    - 优先检查预下载开关（pre_download_all_media）
      * 如果开启预下载：所有媒体（视频和图片）并发下载到缓存目录
@@ -210,36 +327,40 @@ AstrBot插件主类：
    - 返回统一格式的解析结果
    - 如果解析失败：返回异常或None
    ↓
-7. ParserManager._process_parse_result()
+8. ParserManager._process_parse_result()
    - 处理解析结果（成功或失败）
-   - 失败时：构建错误提示节点
+   - 失败时：使用 error_handler 构建错误提示节点
    - 成功时：调用解析器.build_text_node() 和 build_media_nodes()
    - 收集临时文件和视频文件路径
    ↓
-8. 解析器.build_text_node() 和 build_media_nodes()
+9. 解析器.build_text_node() 和 build_media_nodes()
    - build_text_node(): 返回 Plain 对象（包含标题、作者、描述等）
    - build_media_nodes(): 返回扁平化的节点列表（Plain/Image/Video 对象）
    ↓
-9. ParserManager 组织节点
+10. ParserManager 组织节点
    - 区分普通链接和大视频链接
    - 统计 normal_link_count
    - 返回扁平化的节点列表和元数据
    ↓
-10. VideoParserPlugin 发送消息
+11. ResultProcessor.process_and_send()
+   - 使用 ResourceManager 管理资源（上下文管理器）
+   - 根据 is_auto_pack 决定使用 MessageSender 的哪个方法
+   ↓
+12. MessageSender 发送消息
    - 如果 is_auto_pack=True:
-     * 普通链接：扁平化节点放入一个转发消息集合（Nodes）
+     * 使用 send_packed_results(): 普通链接打包为Nodes，大媒体单独发送
      * 纯图片图集：使用一个 chain_result 包含所有 Image
      * 视频图集混合：全部单独发送
-     * 大视频链接：单独发送，发送前显示提示消息
    - 如果 is_auto_pack=False:
-     * 所有链接：单独发送，使用分隔线分割
+     * 使用 send_unpacked_results(): 所有链接单独发送，使用分隔线分割
      * 纯图片图集：使用一个 chain_result 包含所有 Image
      * 视频图集混合：全部单独发送
    - 发送后立即清理视频文件（在 finally 块中确保清理）
    ↓
-11. 清理临时文件
-   - 所有链接处理完成后统一清理临时图片文件
-   - 异常情况下也会清理（异常处理机制）
+13. ResourceManager 自动清理
+   - 上下文管理器退出时自动清理所有注册的文件
+   - 临时文件和缓存文件分别管理
+   - 异常情况下也会清理（上下文管理器保证）
 ```
 
 ## 配置架构
@@ -429,15 +550,57 @@ AstrBot插件主类：
            pass
    ```
 
-3. 可选：重写 `get_video_size()` 方法（如果需要特殊的请求头）
+3. 使用 `ParserRegistry.register()` 装饰器注册解析器：
+   ```python
+   from ..core.parser_registry import ParserRegistry
+   
+   @ParserRegistry.register("youtube")
+   class YoutubeParser(BaseVideoParser):
+       # ...
+   ```
 
-4. 可选：重写 `build_media_nodes()` 方法（如果需要自定义媒体节点构建逻辑）
+4. 可选：重写 `get_video_size()` 方法（如果需要特殊的请求头）
 
-5. 在 `parsers/__init__.py` 中导出新解析器
+5. 可选：重写 `build_media_nodes()` 方法（如果需要自定义媒体节点构建逻辑）
 
-6. 在 `main.py` 中根据配置初始化新解析器
+6. 在 `parsers/__init__.py` 中导出新解析器：
+   ```python
+   from .youtube import YoutubeParser
+   
+   __all__ = [
+       # ... 其他解析器
+       'YoutubeParser',
+   ]
+   ```
 
-7. 在 `_conf_schema.json` 中添加配置项（启用/禁用开关）
+7. 在 `core/parser_initializer.py` 中导入解析器模块（确保解析器被注册）：
+   ```python
+   from ..parsers.youtube import YoutubeParser  # noqa: F401
+   ```
+
+8. 在 `_conf_schema.json` 中添加配置项（启用/禁用开关）：
+   ```json
+   {
+     "parser_enable_settings": {
+       "enable_youtube": {
+         "type": "bool",
+         "default": true,
+         "description": "是否启用YouTube解析器"
+       }
+     }
+   }
+   ```
+
+9. 在 `core/parser_factory.py` 中添加解析器创建逻辑（如果需要特殊配置）：
+   ```python
+   if config_manager.parser_enable_settings.get("enable_youtube", True):
+       parsers.append(YoutubeParser(config_manager))
+   ```
+
+**注意**：
+- 解析器会自动通过 `ParserRegistry` 注册，无需手动管理
+- `ParserFactory` 会自动发现并创建所有已注册的解析器
+- 配置通过 `ConfigManager` 统一管理，解析器可以通过构造函数接收 `ConfigManager` 实例
 
 ### 解析结果格式
 
@@ -526,31 +689,56 @@ AstrBot插件主类：
 
 ## 设计原则
 
-1. **单一职责**：每个解析器只负责一个平台的解析
+1. **单一职责**：
+   - 每个解析器只负责一个平台的解析
+   - ConfigManager 只负责配置管理
+   - MessageSender 只负责消息发送
+   - ResultProcessor 只负责结果处理
+   - ResourceManager 只负责资源管理
+
 2. **开闭原则**：对扩展开放，对修改封闭
-3. **统一接口**：所有解析器使用相同的接口
+   - 通过 ParserRegistry 注册新解析器，无需修改核心代码
+   - 通过工厂模式创建解析器，便于扩展
+
+3. **统一接口**：所有解析器使用相同的接口（BaseVideoParser）
+
 4. **自动识别**：管理器自动识别链接类型并选择合适的解析器
-5. **可配置**：支持启用/禁用特定解析器
+
+5. **可配置**：支持启用/禁用特定解析器，所有配置通过 ConfigManager 统一管理
+
 6. **扁平化节点**：所有节点都是扁平化的（Plain/Image/Video 对象），不再使用嵌套的 Node 结构
+
 7. **立即清理**：文件发送后立即清理，不占用磁盘空间
-8. **错误处理**：完善的错误处理和重试机制
+
+8. **错误处理**：完善的错误处理和重试机制，使用 error_handler 统一格式化错误消息
+
 9. **容错性**：单个链接失败不影响其他链接的解析
-10. **资源管理**：使用 try-finally 确保资源（文件、连接）得到正确清理
+
+10. **资源管理**：使用 ResourceManager 上下文管理器确保资源（文件、连接）得到正确清理
+
+11. **延迟导入**：使用 `__getattr__` 实现延迟导入，避免循环导入问题
+
+12. **模块化设计**：核心功能（core/）和工具功能（utils/）分离，提高代码可维护性
+
+13. **依赖注入**：通过构造函数注入依赖（如 logger、config_manager），提高可测试性
 
 ## 优势
 
-1. **易于扩展**：添加新解析器只需实现三个方法
-2. **统一管理**：所有解析器由管理器统一调度
+1. **易于扩展**：添加新解析器只需实现三个方法，通过 ParserRegistry 注册即可
+2. **统一管理**：所有解析器由 ParserManager 统一调度
 3. **自动识别**：无需手动指定解析器
-4. **灵活配置**：可以按需启用/禁用解析器
-5. **代码复用**：基类提供通用功能
+4. **灵活配置**：可以按需启用/禁用解析器，所有配置通过 ConfigManager 统一管理
+5. **代码复用**：基类提供通用功能，工具类提供可复用的功能
 6. **并行解析**：多个链接并行解析，提高效率
 7. **大媒体处理**：自动处理大媒体（视频和图片），避免消息适配器限制
 8. **预先下载**：支持预先下载所有媒体到本地，提高发送成功率，减少总下载时间
 9. **避免重复**：优先检查预下载开关，避免重复下载媒体文件
-10. **文件管理**：自动清理临时文件，节省磁盘空间
-11. **错误恢复**：完善的错误处理和重试机制
+10. **文件管理**：使用 ResourceManager 自动清理临时文件，节省磁盘空间
+11. **错误恢复**：完善的错误处理和重试机制，使用 error_handler 统一格式化错误消息
 12. **平台兼容**：支持多种消息平台和流媒体平台
+13. **模块化**：核心功能（core/）和工具功能（utils/）分离，提高代码可维护性和可测试性
+14. **解耦设计**：各模块职责清晰，依赖关系明确，便于测试和维护
+15. **延迟导入**：避免循环导入问题，提高模块加载效率
 
 ## 技术细节
 
@@ -632,6 +820,9 @@ AstrBot插件主类：
 - 本地测试不使用缓存目录，所有文件保存在临时目录
 - 测试完成后需要手动清理下载的文件
 - 支持代理配置（用于 Twitter 链接测试）
+- **astrbot 模拟**：脚本在开始时立即设置所有 astrbot 模拟模块，确保项目模块可以正常导入
+- **模块加载**：脚本按依赖关系顺序动态加载模块，避免循环导入问题
+- **完整包路径**：使用完整包路径（`astrbot_plugin_video_parser.core.xxx`）导入模块，确保相对导入正常工作
 
 ### 配置代理
 

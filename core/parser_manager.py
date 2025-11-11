@@ -8,7 +8,9 @@ import aiohttp
 from astrbot.api import logger
 from astrbot.api.message_components import Plain
 
-from .parsers.base_parser import BaseVideoParser
+from ..parsers.base_parser import BaseVideoParser
+from .constants import DEFAULT_SESSION_TIMEOUT
+from ..utils.error_handler import normalize_error_message, format_parse_error
 
 
 class ParserManager:
@@ -78,24 +80,6 @@ class ParserManager:
                 links_with_parser.append((link, parser))
         return links_with_parser
 
-    def _deduplicate_links(
-        self,
-        links_with_parser: List[Tuple[str, BaseVideoParser]]
-    ) -> Dict[str, BaseVideoParser]:
-        """对链接进行去重。
-
-        Args:
-            links_with_parser: 链接和解析器的列表
-
-        Returns:
-            去重后的链接和解析器字典
-        """
-        unique_links = {}
-        for link, parser in links_with_parser:
-            if link not in unique_links:
-                unique_links[link] = parser
-        return unique_links
-
     async def parse_url(
         self,
         url: str,
@@ -132,7 +116,8 @@ class ParserManager:
         links_with_parser = self.extract_all_links(text)
         if not links_with_parser:
             return []
-        unique_links = self._deduplicate_links(links_with_parser)
+        # extract_all_links已经去重，直接转换为字典
+        unique_links = {link: parser for link, parser in links_with_parser}
         tasks = [
             parser.parse(session, url)
             for url, parser in unique_links.items()
@@ -190,18 +175,14 @@ class ParserManager:
                 self.logger.exception(
                     f"解析URL失败: {url}, 错误: {result}"
                 )
-                error_msg = str(result)
-                if error_msg.startswith("解析失败："):
-                    failure_reason = error_msg.replace("解析失败：", "", 1)
-                else:
-                    failure_reason = error_msg
-                if ("本地缓存路径无效" in failure_reason or
-                        "cache_dir" in failure_reason.lower()):
-                    failure_reason = "本地缓存路径无效"
+                failure_reason = normalize_error_message(result)
             else:
                 self.logger.warning(f"解析URL返回None: {url}")
                 failure_reason = "未知错误"
-            failure_text = f"解析失败：{failure_reason}\n原始链接：{url}"
+            failure_text = format_parse_error(
+                url,
+                result if isinstance(result, Exception) else None
+            )
             link_nodes = [Plain(failure_text)]
             return {
                 'link_nodes': link_nodes,
@@ -280,11 +261,12 @@ class ParserManager:
             links_with_parser = self.extract_all_links(input_text)
             if not links_with_parser:
                 return None
-            unique_links = self._deduplicate_links(links_with_parser)
+            # extract_all_links已经去重，直接转换为字典
+            unique_links = {link: parser for link, parser in links_with_parser}
             all_link_nodes = []
             link_metadata = []
             normal_link_count = 0
-            timeout = aiohttp.ClientTimeout(total=30)
+            timeout = aiohttp.ClientTimeout(total=DEFAULT_SESSION_TIMEOUT)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 parse_results = await self._execute_parse_tasks(
                     session,
@@ -355,3 +337,4 @@ class ParserManager:
                     os.unlink(file_path)
                 except Exception:
                     pass
+

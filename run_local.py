@@ -9,6 +9,7 @@ import importlib.util
 import types
 import re
 import logging
+from typing import List, Any, Optional, Dict
 
 # 获取项目根目录
 _project_root = os.path.dirname(os.path.abspath(__file__))
@@ -18,7 +19,7 @@ if _project_root not in sys.path:
 # 包名称
 _package_name = "astrbot_plugin_video_parser"
 
-# 创建 astrbot 模拟模块
+# 创建 astrbot 模拟模块（必须在任何导入之前执行）
 def _setup_astrbot_mock():
     """创建 astrbot 模拟模块以支持本地测试"""
     # 创建 astrbot 模块
@@ -26,11 +27,104 @@ def _setup_astrbot_mock():
         _astrbot_module = types.ModuleType("astrbot")
         sys.modules["astrbot"] = _astrbot_module
     
-    # 创建 astrbot.api 模块
+    # 创建 astrbot.api 模块（作为包）
     if "astrbot.api" not in sys.modules:
         _astrbot_api_module = types.ModuleType("astrbot.api")
+        _astrbot_api_module.__path__ = []  # 设置为包
         sys.modules["astrbot.api"] = _astrbot_api_module
         setattr(sys.modules["astrbot"], "api", _astrbot_api_module)
+    
+    # 创建 astrbot.api.event 模块
+    if "astrbot.api.event" not in sys.modules:
+        _event_module = types.ModuleType("astrbot.api.event")
+        
+        # 定义 AstrMessageEvent 类
+        class AstrMessageEvent:
+            def __init__(self):
+                self.message_str = ""
+            
+            def get_platform_name(self):
+                return "test"
+            
+            def get_self_id(self):
+                return "test_id"
+            
+            def send(self, result):
+                print(f"[模拟发送] {result}")
+                return None
+            
+            def plain_result(self, text):
+                return text
+            
+            def chain_result(self, components):
+                return components
+        
+        # 定义 filter 装饰器
+        class Filter:
+            @staticmethod
+            def event_message_type(message_type):
+                def decorator(func):
+                    return func
+                return decorator
+        
+        _event_module.AstrMessageEvent = AstrMessageEvent
+        _event_module.filter = Filter()
+        sys.modules["astrbot.api.event"] = _event_module
+        setattr(sys.modules["astrbot.api"], "event", _event_module)
+    
+    # 创建 astrbot.api.star 模块
+    if "astrbot.api.star" not in sys.modules:
+        _star_module = types.ModuleType("astrbot.api.star")
+        
+        class Context:
+            pass
+        
+        class Star:
+            def __init__(self, context):
+                self.context = context
+        
+        def register(name, author, description, version):
+            def decorator(cls):
+                return cls
+            return decorator
+        
+        _star_module.Context = Context
+        _star_module.Star = Star
+        _star_module.register = register
+        sys.modules["astrbot.api.star"] = _star_module
+        setattr(sys.modules["astrbot.api"], "star", _star_module)
+    
+    # 创建 astrbot.core 模块
+    if "astrbot.core" not in sys.modules:
+        _core_module = types.ModuleType("astrbot.core")
+        _core_module.__path__ = []
+        sys.modules["astrbot.core"] = _core_module
+        setattr(sys.modules["astrbot"], "core", _core_module)
+    
+    # 创建 astrbot.core.star 模块
+    if "astrbot.core.star" not in sys.modules:
+        _core_star_module = types.ModuleType("astrbot.core.star")
+        _core_star_module.__path__ = []
+        sys.modules["astrbot.core.star"] = _core_star_module
+        setattr(sys.modules["astrbot.core"], "star", _core_star_module)
+    
+    # 创建 astrbot.core.star.filter 模块
+    if "astrbot.core.star.filter" not in sys.modules:
+        _filter_module = types.ModuleType("astrbot.core.star.filter")
+        _filter_module.__path__ = []
+        sys.modules["astrbot.core.star.filter"] = _filter_module
+        setattr(sys.modules["astrbot.core.star"], "filter", _filter_module)
+    
+    # 创建 astrbot.core.star.filter.event_message_type 模块
+    if "astrbot.core.star.filter.event_message_type" not in sys.modules:
+        _event_message_type_module = types.ModuleType("astrbot.core.star.filter.event_message_type")
+        
+        class EventMessageType:
+            ALL = "all"
+        
+        _event_message_type_module.EventMessageType = EventMessageType
+        sys.modules["astrbot.core.star.filter.event_message_type"] = _event_message_type_module
+        setattr(sys.modules["astrbot.core.star.filter"], "event_message_type", _event_message_type_module)
     
     # 创建 astrbot.api.message_components 模块
     if "astrbot.api.message_components" not in sys.modules:
@@ -64,18 +158,26 @@ def _setup_astrbot_mock():
                 return f"Video(url={self.url!r})"
         
         class Node:
-            def __init__(self, sender_name: str, sender_id, *components):
-                self.sender_name = sender_name
-                self.sender_id = sender_id
-                self.components = list(components)
+            def __init__(self, name: str = None, uin: Any = None, content: List = None, **kwargs):
+                self.name = name
+                self.uin = uin
+                self.content = content or []
+                self.__dict__.update(kwargs)
             def __repr__(self):
-                return f"Node(sender={self.sender_name}, components={len(self.components)})"
+                return f"Node(name={self.name}, content={len(self.content) if self.content else 0})"
+        
+        class Nodes:
+            def __init__(self, nodes: List):
+                self.nodes = nodes
+            def __repr__(self):
+                return f"Nodes(count={len(self.nodes)})"
         
         # 将类添加到模块
         _message_components_module.Plain = Plain
         _message_components_module.Image = Image
         _message_components_module.Video = Video
         _message_components_module.Node = Node
+        _message_components_module.Nodes = Nodes
         
         sys.modules["astrbot.api.message_components"] = _message_components_module
         setattr(sys.modules["astrbot.api"], "message_components", _message_components_module)
@@ -90,11 +192,14 @@ def _setup_astrbot_mock():
             _logger.addHandler(_handler)
         setattr(sys.modules["astrbot.api"], "logger", _logger)
 
+# 立即设置 astrbot 模拟模块（在任何其他导入之前）
+_setup_astrbot_mock()
+
 # 创建包模块结构
 def _setup_package_structure():
     """设置包结构以支持相对导入"""
-    # 首先创建 astrbot 模拟模块
-    _setup_astrbot_mock()
+    # 注意：astrbot 模拟模块已经在脚本开始时设置好了
+    # 这里不需要再次调用 _setup_astrbot_mock()
     
     # 创建主包
     if _package_name not in sys.modules:
@@ -162,27 +267,114 @@ def _setup_package_structure():
         # 将 parsers 模块添加到主包
         setattr(sys.modules[_package_name], "parsers", _parsers_init_module)
     
-    # 加载 parser_manager 模块
-    # 使用 importlib 加载，确保相对导入能够工作
-    _parser_manager_file = os.path.join(_project_root, "parser_manager.py")
-    if os.path.exists(_parser_manager_file):
-        # 使用完整的模块名来支持相对导入
-        _parser_manager_module_name = f"{_package_name}.parser_manager"
-        _parser_manager_spec = importlib.util.spec_from_file_location(
-            _parser_manager_module_name, _parser_manager_file
-        )
-        _parser_manager_module = importlib.util.module_from_spec(_parser_manager_spec)
-        _parser_manager_module.__package__ = _package_name
-        # 确保模块可以访问包和子包
-        _parser_manager_module.__dict__[_package_name] = sys.modules[_package_name]
+    # 加载 core 模块
+    _core_dir = os.path.join(_project_root, "core")
+    if os.path.exists(_core_dir):
+        _core_pkg_name = f"{_package_name}.core"
+        # 创建 core 包模块
+        if _core_pkg_name not in sys.modules:
+            _core_module = types.ModuleType(_core_pkg_name)
+            _core_module.__package__ = _core_pkg_name
+            _core_module.__path__ = [_core_dir]
+            sys.modules[_core_pkg_name] = _core_module
+            setattr(sys.modules[_package_name], "core", _core_module)
+        
+        # 加载 core 目录下的所有模块
+        _core_init_file = os.path.join(_core_dir, "__init__.py")
+        if os.path.exists(_core_init_file):
+            _core_init_spec = importlib.util.spec_from_file_location(
+                f"{_core_pkg_name}.__init__", _core_init_file
+            )
+            _core_init_module = importlib.util.module_from_spec(_core_init_spec)
+            _core_init_module.__package__ = _core_pkg_name
+            sys.modules[f"{_core_pkg_name}.__init__"] = _core_init_module
+            _core_init_spec.loader.exec_module(_core_init_module)
+        
+        # 加载 core 下的其他模块（按依赖顺序加载）
+        # 先加载基础模块（constants, exceptions）
+        _base_core_files = ["constants.py", "exceptions.py"]
+        for _core_file in _base_core_files:
+            _core_file_path = os.path.join(_core_dir, _core_file)
+            if os.path.exists(_core_file_path):
+                _core_module_name = f"{_core_pkg_name}.{_core_file[:-3]}"
+                _core_spec = importlib.util.spec_from_file_location(
+                    _core_module_name, _core_file_path
+                )
+                _core_module = importlib.util.module_from_spec(_core_spec)
+                _core_module.__package__ = _core_pkg_name
+                sys.modules[_core_module_name] = _core_module
+                _core_spec.loader.exec_module(_core_module)
+    
+    # 加载 utils 模块（需要在 core.exceptions 之后，因为 utils.error_handler 依赖它）
+    _utils_dir = os.path.join(_project_root, "utils")
+    if os.path.exists(_utils_dir):
+        _utils_pkg_name = f"{_package_name}.utils"
+        # 创建 utils 包模块
+        if _utils_pkg_name not in sys.modules:
+            _utils_module = types.ModuleType(_utils_pkg_name)
+            _utils_module.__package__ = _utils_pkg_name
+            _utils_module.__path__ = [_utils_dir]
+            sys.modules[_utils_pkg_name] = _utils_module
+            setattr(sys.modules[_package_name], "utils", _utils_module)
+        
+        # 加载 utils 目录下的所有模块
+        _utils_init_file = os.path.join(_utils_dir, "__init__.py")
+        if os.path.exists(_utils_init_file):
+            _utils_init_spec = importlib.util.spec_from_file_location(
+                f"{_utils_pkg_name}.__init__", _utils_init_file
+            )
+            _utils_init_module = importlib.util.module_from_spec(_utils_init_spec)
+            _utils_init_module.__package__ = _utils_pkg_name
+            sys.modules[f"{_utils_pkg_name}.__init__"] = _utils_init_module
+            _utils_init_spec.loader.exec_module(_utils_init_module)
+        
+        # 加载 utils 下的其他模块
+        _utils_files = ["error_handler.py", "resource_manager.py", 
+                       "message_sender.py", "result_processor.py"]
+        for _utils_file in _utils_files:
+            _utils_file_path = os.path.join(_utils_dir, _utils_file)
+            if os.path.exists(_utils_file_path):
+                _utils_module_name = f"{_utils_pkg_name}.{_utils_file[:-3]}"
+                _utils_spec = importlib.util.spec_from_file_location(
+                    _utils_module_name, _utils_file_path
+                )
+                _utils_module = importlib.util.module_from_spec(_utils_spec)
+                _utils_module.__package__ = _utils_pkg_name
+                sys.modules[_utils_module_name] = _utils_module
+                _utils_spec.loader.exec_module(_utils_module)
+    
+    # 继续加载 core 的其他模块（需要在 utils 之后，因为 parser_manager 需要 utils.error_handler）
+    _core_dir = os.path.join(_project_root, "core")
+    if os.path.exists(_core_dir):
+        _core_pkg_name = f"{_package_name}.core"
+        # 然后加载其他模块
+        _other_core_files = ["config_manager.py", "parser_registry.py", 
+                            "parser_factory.py", "parser_manager.py", 
+                            "parser_initializer.py"]
+        for _core_file in _other_core_files:
+            _core_file_path = os.path.join(_core_dir, _core_file)
+            if os.path.exists(_core_file_path):
+                _core_module_name = f"{_core_pkg_name}.{_core_file[:-3]}"
+                # 如果模块已经加载，跳过
+                if _core_module_name not in sys.modules:
+                    _core_spec = importlib.util.spec_from_file_location(
+                        _core_module_name, _core_file_path
+                    )
+                    _core_module = importlib.util.module_from_spec(_core_spec)
+                    _core_module.__package__ = _core_pkg_name
+                    sys.modules[_core_module_name] = _core_module
+                    _core_spec.loader.exec_module(_core_module)
+        
+        # 为了向后兼容，将模块注册为可以直接导入
+        if f"{_core_pkg_name}.parser_manager" in sys.modules:
+            sys.modules["parser_manager"] = sys.modules[f"{_core_pkg_name}.parser_manager"]
+            sys.modules["core"] = sys.modules[_core_pkg_name]
+            sys.modules["core.parser_manager"] = sys.modules[f"{_core_pkg_name}.parser_manager"]
+        
+        # 注册 parsers 为可以直接导入（在函数开始处定义的变量）
+        _parsers_pkg_name = f"{_package_name}.parsers"
         if _parsers_pkg_name in sys.modules:
-            _parser_manager_module.__dict__["parsers"] = sys.modules[_parsers_pkg_name]
-        sys.modules[_parser_manager_module_name] = _parser_manager_module
-        # 同时注册为 "parser_manager" 以便直接导入
-        sys.modules["parser_manager"] = _parser_manager_module
-        # 将 parser_manager 添加到主包
-        setattr(sys.modules[_package_name], "parser_manager", _parser_manager_module)
-        _parser_manager_spec.loader.exec_module(_parser_manager_module)
+            sys.modules["parsers"] = sys.modules[_parsers_pkg_name]
 
 # 设置包结构
 _setup_package_structure()
@@ -194,11 +386,10 @@ import shutil
 import traceback
 import json
 from urllib.parse import urlparse
-from typing import Optional, Dict, Any
 
-# 导入解析器管理器
-from parser_manager import ParserManager
-from parsers import (
+# 导入解析器管理器（使用完整包路径）
+from astrbot_plugin_video_parser.core.parser_manager import ParserManager
+from astrbot_plugin_video_parser.parsers import (
     BilibiliParser,
     DouyinParser,
     KuaishouParser,

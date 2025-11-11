@@ -9,6 +9,12 @@ from typing import Optional, Dict, Any, List
 import aiohttp
 
 from astrbot.api.message_components import Plain, Image, Video
+from ..core.constants import (
+    DEFAULT_HEAD_TIMEOUT,
+    DEFAULT_IMAGE_DOWNLOAD_TIMEOUT,
+    DEFAULT_VIDEO_DOWNLOAD_TIMEOUT,
+    MAX_LARGE_MEDIA_THRESHOLD_MB
+)
 
 
 class BaseVideoParser(ABC):
@@ -37,12 +43,13 @@ class BaseVideoParser(ABC):
         self.cache_dir = cache_dir
         self.pre_download_all_media = pre_download_all_media
         self.max_concurrent_downloads = max_concurrent_downloads
-        self.semaphore = None
+        # 先限制最大值，再判断是否启用
+        large_media_threshold_mb = min(
+            large_media_threshold_mb,
+            MAX_LARGE_MEDIA_THRESHOLD_MB
+        )
         if large_media_threshold_mb > 0:
-            self.large_media_threshold_mb = min(
-                large_media_threshold_mb,
-                100.0
-            )
+            self.large_media_threshold_mb = large_media_threshold_mb
         else:
             self.large_media_threshold_mb = 0.0
         self.cache_dir_available = self._check_cache_dir_available(cache_dir)
@@ -93,21 +100,58 @@ class BaseVideoParser(ABC):
     async def get_video_size(
         self,
         video_url: str,
-        session: aiohttp.ClientSession
+        session: aiohttp.ClientSession,
+        headers: dict = None,
+        referer: str = None,
+        default_referer: str = None,
+        proxy: str = None
     ) -> Optional[float]:
         """获取视频文件大小。
 
         Args:
             video_url: 视频URL
             session: aiohttp会话
+            headers: 自定义请求头（如果提供，会与默认请求头合并）
+            referer: Referer URL，如果提供则使用
+            default_referer: 默认Referer URL（如果referer未提供）
+            proxy: 代理地址（可选）
 
         Returns:
             视频大小(MB)，如果无法获取返回None
         """
         try:
+            request_headers = headers.copy() if headers else {}
+            if referer:
+                request_headers["Referer"] = referer
+            elif default_referer:
+                request_headers["Referer"] = default_referer
+            
             async with session.head(
                 video_url,
-                timeout=aiohttp.ClientTimeout(total=10)
+                headers=request_headers,
+                timeout=aiohttp.ClientTimeout(total=DEFAULT_HEAD_TIMEOUT),
+                proxy=proxy
+            ) as resp:
+                content_range = resp.headers.get("Content-Range")
+                if content_range:
+                    match = re.search(r'/\s*(\d+)', content_range)
+                    if match:
+                        size_bytes = int(match.group(1))
+                        size_mb = size_bytes / (1024 * 1024)
+                        return size_mb
+                content_length = resp.headers.get("Content-Length")
+                if content_length:
+                    size_bytes = int(content_length)
+                    size_mb = size_bytes / (1024 * 1024)
+                    return size_mb
+            
+            # 如果HEAD请求失败，尝试使用Range请求
+            request_headers["Range"] = "bytes=0-1"
+            async with session.get(
+                video_url,
+                headers=request_headers,
+                timeout=aiohttp.ClientTimeout(total=DEFAULT_HEAD_TIMEOUT),
+                proxy=proxy
             ) as resp:
                 content_range = resp.headers.get("Content-Range")
                 if content_range:
@@ -153,7 +197,8 @@ class BaseVideoParser(ABC):
         self,
         image_url: str,
         session: aiohttp.ClientSession,
-        headers: dict = None
+        headers: dict = None,
+        proxy: str = None
     ) -> Optional[float]:
         """获取图片文件大小。
 
@@ -161,16 +206,18 @@ class BaseVideoParser(ABC):
             image_url: 图片URL
             session: aiohttp会话
             headers: 请求头（可选）
+            proxy: 代理地址（可选）
 
         Returns:
             图片大小(MB)，如果无法获取返回None
         """
         try:
-            request_headers = headers or {}
+            request_headers = headers.copy() if headers else {}
             async with session.head(
                 image_url,
                 headers=request_headers,
-                timeout=aiohttp.ClientTimeout(total=10)
+                timeout=aiohttp.ClientTimeout(total=DEFAULT_HEAD_TIMEOUT),
+                proxy=proxy
             ) as resp:
                 content_range = resp.headers.get("Content-Range")
                 if content_range:
@@ -320,7 +367,7 @@ class BaseVideoParser(ABC):
             async with session.get(
                 image_url,
                 headers=default_headers,
-                timeout=aiohttp.ClientTimeout(total=30)
+                timeout=aiohttp.ClientTimeout(total=DEFAULT_IMAGE_DOWNLOAD_TIMEOUT)
             ) as response:
                 response.raise_for_status()
                 content = await response.read()
@@ -611,7 +658,7 @@ class BaseVideoParser(ABC):
                 async with session.get(
                     media_url,
                     headers=default_headers,
-                    timeout=aiohttp.ClientTimeout(total=300),
+                    timeout=aiohttp.ClientTimeout(total=DEFAULT_VIDEO_DOWNLOAD_TIMEOUT),
                     proxy=proxy
                 ) as response:
                     response.raise_for_status()
@@ -1019,3 +1066,19 @@ class BaseVideoParser(ABC):
                 })
 
         return processed_results
+
+    def _cleanup_files_list(self, file_paths: list):
+        """清理文件列表（兼容旧接口）。
+
+        Args:
+            file_paths: 文件路径列表
+        
+        Note:
+            此方法保留用于向后兼容，建议使用ResourceManager
+        """
+        for file_path in file_paths:
+            if file_path and os.path.exists(file_path):
+                try:
+                    os.unlink(file_path)
+                except Exception:
+                    pass

@@ -394,50 +394,13 @@ class XiaohongshuParser(BaseVideoParser):
         Returns:
             视频大小(MB)，如果无法获取返回None
         """
-        try:
-            headers = self.headers.copy()
-            if referer:
-                headers["Referer"] = referer
-            else:
-                headers["Referer"] = 'https://www.xiaohongshu.com/'
-            async with session.head(
-                video_url,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
-                content_range = resp.headers.get("Content-Range")
-                if content_range:
-                    match = re.search(r'/\s*(\d+)', content_range)
-                    if match:
-                        size_bytes = int(match.group(1))
-                        size_mb = size_bytes / (1024 * 1024)
-                        return size_mb
-                content_length = resp.headers.get("Content-Length")
-                if content_length:
-                    size_bytes = int(content_length)
-                    size_mb = size_bytes / (1024 * 1024)
-                    return size_mb
-            headers["Range"] = "bytes=0-1"
-            async with session.get(
-                video_url,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
-                content_range = resp.headers.get("Content-Range")
-                if content_range:
-                    match = re.search(r'/\s*(\d+)', content_range)
-                    if match:
-                        size_bytes = int(match.group(1))
-                        size_mb = size_bytes / (1024 * 1024)
-                        return size_mb
-                content_length = resp.headers.get("Content-Length")
-                if content_length:
-                    size_bytes = int(content_length)
-                    size_mb = size_bytes / (1024 * 1024)
-                    return size_mb
-        except Exception:
-            pass
-        return None
+        return await super().get_video_size(
+            video_url,
+            session,
+            headers=self.headers,
+            referer=referer,
+            default_referer='https://www.xiaohongshu.com/'
+        )
 
     async def get_image_size(
         self,
@@ -455,30 +418,14 @@ class XiaohongshuParser(BaseVideoParser):
         Returns:
             图片大小(MB)，如果无法获取返回None
         """
-        try:
-            request_headers = headers or self.headers.copy()
-            if "Referer" not in request_headers:
-                request_headers["Referer"] = 'https://www.xiaohongshu.com/'
-            async with session.head(
-                image_url,
-                headers=request_headers,
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
-                content_range = resp.headers.get("Content-Range")
-                if content_range:
-                    match = re.search(r'/\s*(\d+)', content_range)
-                    if match:
-                        size_bytes = int(match.group(1))
-                        size_mb = size_bytes / (1024 * 1024)
-                        return size_mb
-                content_length = resp.headers.get("Content-Length")
-                if content_length:
-                    size_bytes = int(content_length)
-                    size_mb = size_bytes / (1024 * 1024)
-                    return size_mb
-        except Exception:
-            pass
-        return None
+        request_headers = headers or self.headers.copy()
+        if "Referer" not in request_headers:
+            request_headers["Referer"] = 'https://www.xiaohongshu.com/'
+        return await super().get_image_size(
+            image_url,
+            session,
+            headers=request_headers
+        )
 
     def _normalize_url(self, url: str) -> Optional[str]:
         """规范化小红书URL，支持短链接和长链接。

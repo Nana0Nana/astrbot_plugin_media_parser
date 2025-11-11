@@ -749,50 +749,13 @@ class BilibiliParser(BaseVideoParser):
         Returns:
             视频大小(MB)，如果无法获取返回None
         """
-        try:
-            headers = self._default_headers.copy()
-            if referer:
-                headers["Referer"] = referer
-            async with session.head(
-                video_url,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
-                content_range = resp.headers.get("Content-Range")
-                if content_range:
-                    match = re.search(r'/\s*(\d+)', content_range)
-                    if match:
-                        size_bytes = int(match.group(1))
-                        size_mb = size_bytes / (1024 * 1024)
-                        return size_mb
-                content_length = resp.headers.get("Content-Length")
-                if content_length:
-                    size_bytes = int(content_length)
-                    size_mb = size_bytes / (1024 * 1024)
-                    return size_mb
-            headers["Range"] = "bytes=0-1"
-            async with session.get(
-                video_url,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
-                content_range = resp.headers.get("Content-Range")
-                if content_range:
-                    match = re.search(r'/\s*(\d+)', content_range)
-                    if match:
-                        size_bytes = int(match.group(1))
-                        size_mb = size_bytes / (1024 * 1024)
-                        return size_mb
-                content_length = resp.headers.get("Content-Length")
-                if content_length:
-                    size_bytes = int(content_length)
-                    size_mb = size_bytes / (1024 * 1024)
-                    return size_mb
-        except Exception as e:
-            self.logger.warning(
-                f"获取视频大小失败: {video_url}, 错误: {e}"
-            )
-        return None
+        return await super().get_video_size(
+            video_url,
+            session,
+            headers=self._default_headers,
+            referer=referer,
+            default_referer="https://www.bilibili.com"
+        )
 
     async def parse(
         self,

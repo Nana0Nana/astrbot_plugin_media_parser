@@ -222,53 +222,14 @@ class TwitterParser(BaseVideoParser):
         Returns:
             视频大小(MB)，如果无法获取返回None
         """
-        try:
-            proxy = self._get_video_proxy()
-            headers = self.headers.copy()
-            if referer:
-                headers['Referer'] = referer
-            else:
-                headers['Referer'] = 'https://x.com/'
-            async with session.head(
-                video_url,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=10),
-                proxy=proxy
-            ) as resp:
-                content_range = resp.headers.get("Content-Range")
-                if content_range:
-                    match = re.search(r'/\s*(\d+)', content_range)
-                    if match:
-                        size_bytes = int(match.group(1))
-                        size_mb = size_bytes / (1024 * 1024)
-                        return size_mb
-                content_length = resp.headers.get("Content-Length")
-                if content_length:
-                    size_bytes = int(content_length)
-                    size_mb = size_bytes / (1024 * 1024)
-                    return size_mb
-            headers["Range"] = "bytes=0-1"
-            async with session.get(
-                video_url,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=10),
-                proxy=proxy
-            ) as resp:
-                content_range = resp.headers.get("Content-Range")
-                if content_range:
-                    match = re.search(r'/\s*(\d+)', content_range)
-                    if match:
-                        size_bytes = int(match.group(1))
-                        size_mb = size_bytes / (1024 * 1024)
-                        return size_mb
-                content_length = resp.headers.get("Content-Length")
-                if content_length:
-                    size_bytes = int(content_length)
-                    size_mb = size_bytes / (1024 * 1024)
-                    return size_mb
-        except Exception:
-            pass
-        return None
+        return await super().get_video_size(
+            video_url,
+            session,
+            headers=self.headers,
+            referer=referer,
+            default_referer='https://x.com/',
+            proxy=self._get_video_proxy()
+        )
 
     async def get_image_size(
         self,
@@ -286,30 +247,13 @@ class TwitterParser(BaseVideoParser):
         Returns:
             图片大小(MB)，如果无法获取返回None
         """
-        try:
-            proxy = self._get_image_proxy()
-            request_headers = headers or self.headers.copy()
-            async with session.head(
-                image_url,
-                headers=request_headers,
-                timeout=aiohttp.ClientTimeout(total=10),
-                proxy=proxy
-            ) as resp:
-                content_range = resp.headers.get("Content-Range")
-                if content_range:
-                    match = re.search(r'/\s*(\d+)', content_range)
-                    if match:
-                        size_bytes = int(match.group(1))
-                        size_mb = size_bytes / (1024 * 1024)
-                        return size_mb
-                content_length = resp.headers.get("Content-Length")
-                if content_length:
-                    size_bytes = int(content_length)
-                    size_mb = size_bytes / (1024 * 1024)
-                    return size_mb
-        except Exception:
-            pass
-        return None
+        request_headers = headers or self.headers.copy()
+        return await super().get_image_size(
+            image_url,
+            session,
+            headers=request_headers,
+            proxy=self._get_image_proxy()
+        )
 
     async def _download_media_to_file(
         self,
@@ -688,18 +632,6 @@ class TwitterParser(BaseVideoParser):
                 if downloaded_files:
                     self._cleanup_files_list(downloaded_files)
     
-    def _cleanup_files_list(self, file_paths: list):
-        """清理文件列表。
-
-        Args:
-            file_paths: 文件路径列表
-        """
-        for file_path in file_paths:
-            if file_path and os.path.exists(file_path):
-                try:
-                    os.unlink(file_path)
-                except Exception:
-                    pass
 
     def build_media_nodes(
         self,

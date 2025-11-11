@@ -1,0 +1,34 @@
+# -*- coding: utf-8 -*-
+"""常量定义文件。"""
+
+# 媒体大小限制
+MAX_LARGE_MEDIA_THRESHOLD_MB = 100.0
+DEFAULT_LARGE_MEDIA_THRESHOLD_MB = 100.0
+DEFAULT_MAX_MEDIA_SIZE_MB = 0.0
+
+# 下载配置
+DEFAULT_MAX_CONCURRENT_DOWNLOADS = 3
+DEFAULT_CACHE_DIR = "/app/sharedFolder/video_parser/cache"
+
+# 超时配置（秒）
+DEFAULT_SESSION_TIMEOUT = 30
+DEFAULT_HEAD_TIMEOUT = 10
+DEFAULT_IMAGE_DOWNLOAD_TIMEOUT = 30
+DEFAULT_VIDEO_DOWNLOAD_TIMEOUT = 300
+DEFAULT_TWITTER_VIDEO_DOWNLOAD_TIMEOUT = 60
+
+# 重试配置
+DEFAULT_MAX_RETRIES = 3
+DEFAULT_RETRY_DELAY = 1.0
+DEFAULT_DOWNLOAD_RETRY_DELAY = 0.5
+
+# 分隔符
+LINK_SEPARATOR = "-------------------------------------"
+
+# 默认Referer
+DEFAULT_REFERER_BILIBILI = "https://www.bilibili.com"
+DEFAULT_REFERER_DOUYIN = "https://www.douyin.com/"
+DEFAULT_REFERER_XIAOHONGSHU = "https://www.xiaohongshu.com/"
+DEFAULT_REFERER_TWITTER = "https://x.com/"
+DEFAULT_REFERER_KUAISHOU = "https://www.kuaishou.com/"
+

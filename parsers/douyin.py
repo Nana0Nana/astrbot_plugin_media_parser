@@ -321,50 +321,13 @@ class DouyinParser(BaseVideoParser):
         Returns:
             视频大小(MB)，如果无法获取返回None
         """
-        try:
-            headers = self.headers.copy()
-            if referer:
-                headers["Referer"] = referer
-            else:
-                headers["Referer"] = 'https://www.douyin.com/'
-            async with session.head(
-                video_url,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
-                content_range = resp.headers.get("Content-Range")
-                if content_range:
-                    match = re.search(r'/\s*(\d+)', content_range)
-                    if match:
-                        size_bytes = int(match.group(1))
-                        size_mb = size_bytes / (1024 * 1024)
-                        return size_mb
-                content_length = resp.headers.get("Content-Length")
-                if content_length:
-                    size_bytes = int(content_length)
-                    size_mb = size_bytes / (1024 * 1024)
-                    return size_mb
-            headers["Range"] = "bytes=0-1"
-            async with session.get(
-                video_url,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
-                content_range = resp.headers.get("Content-Range")
-                if content_range:
-                    match = re.search(r'/\s*(\d+)', content_range)
-                    if match:
-                        size_bytes = int(match.group(1))
-                        size_mb = size_bytes / (1024 * 1024)
-                        return size_mb
-                content_length = resp.headers.get("Content-Length")
-                if content_length:
-                    size_bytes = int(content_length)
-                    size_mb = size_bytes / (1024 * 1024)
-                    return size_mb
-        except Exception:
-            pass
-        return None
+        return await super().get_video_size(
+            video_url,
+            session,
+            headers=self.headers,
+            referer=referer,
+            default_referer='https://www.douyin.com/'
+        )
 
     async def _download_image_to_file(
         self,
@@ -992,18 +955,6 @@ class DouyinParser(BaseVideoParser):
                 if downloaded_files:
                     self._cleanup_files_list(downloaded_files)
 
-    def _cleanup_files_list(self, file_paths: list):
-        """清理文件列表。
-
-        Args:
-            file_paths: 文件路径列表
-        """
-        for file_path in file_paths:
-            if file_path and os.path.exists(file_path):
-                try:
-                    os.unlink(file_path)
-                except Exception:
-                    pass
 
     def build_media_nodes(
         self,
