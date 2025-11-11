@@ -14,7 +14,7 @@ from .utils import ResourceManager, MessageSender, ResultProcessor
     "astrbot_plugin_video_parser",
     "drdon1234",
     "聚合解析流媒体平台链接，转换为媒体直链发送",
-    "1.1.0"
+    "2.0.0"
 )
 class VideoParserPlugin(Star):
 
