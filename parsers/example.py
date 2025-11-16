@@ -94,4 +94,4 @@ class ExampleParser(BaseVideoParser):
             # }
             return None
         except Exception as e:
-            raise RuntimeError(f"解析失败：{str(e)}")
+            raise RuntimeError(str(e))

@@ -231,8 +231,8 @@ astrbot_plugin_video_parser/
 - 根据配置决定下载策略：
   - 超过 `max_video_size_mb`：跳过，不下载（下载前和下载后都会检查）
   - 超过 `large_video_threshold_mb`：下载到缓存目录
-  - 推特视频：强制下载到缓存
   - 启用 `pre_download_all_media`：预先下载所有媒体（下载前会先检查大小）
+  - 图片文件：总是下载到临时文件（在非预下载模式下）
 - 管理并发下载数量
 - 为元数据添加文件路径信息
 - 下载后再次验证视频大小，确保不超过限制
@@ -260,8 +260,7 @@ astrbot_plugin_video_parser/
    └─ 遍历 image_urls，为每个图片创建媒体项（包含 url_list）
 
 4. 下载所有媒体到缓存（pre_download_media）
-   ├─ 单条直链：重试一次（总共尝试2次）
-   └─ 多条直链：遍历列表直到成功，不对同一条URL重试
+   └─ 遍历URL列表，每个URL只尝试一次，直到成功或所有URL都失败
 
 5. 处理下载结果（_process_download_results）
    ├─ 构建文件路径列表
@@ -285,20 +284,24 @@ astrbot_plugin_video_parser/
 3. 验证图片URL（验证每个图片的第一个URL）
    └─ 检查是否有有效的图片
 
-4. 检查是否需要下载
-   ├─ 超过 large_video_threshold_mb → 下载到缓存
-   ├─ 是推特视频 → 下载到缓存
-   └─ 其他 → 使用直链
+4. 检查是否需要下载视频
+   ├─ 超过 large_video_threshold_mb → 下载视频到缓存
+   └─ 其他 → 使用视频直链
 
-5. 如果下载了媒体，下载后再次检查大小（从实际文件大小获取）
+5. 下载图片到临时文件（无论是否需要下载视频）
+   └─ 所有图片都下载到临时文件，提高发送成功率
+
+6. 如果下载了视频，下载后再次检查大小（从实际文件大小获取）
    ├─ 超过 max_video_size_mb → 清理已下载文件，标记 exceeds_max_size
    └─ 未超过 → 使用本地文件
 ```
 
-**重试逻辑**：
-- 单条直链（`len(url_list) == 1`）：重试一次，总共尝试2次
-- 多条直链（`len(url_list) > 1`）：遍历列表中的每个URL，直到成功下载，不对同一条URL重试
+**下载逻辑**：
+- 每个媒体项包含 `url_list`（可用URL列表）
+- 遍历 `url_list` 中的每个URL，每个URL只尝试一次
+- 如果某个URL下载成功，立即返回成功结果
 - 如果所有URL都失败，标记为下载失败，统计到失败计数中
+- 注意：当前实现中每个URL只尝试一次，没有重试机制
 
 ### 6. Downloader (core/downloader.py)
 
@@ -306,18 +309,18 @@ astrbot_plugin_video_parser/
 
 **主要功能**：
 - 通过 HEAD 请求获取视频大小
-- 下载媒体文件到临时目录
-- 将临时文件移动到缓存目录
+- 下载媒体文件到缓存目录或临时文件
+- 文件命名格式：`{media_id}_{index}_{timestamp}{suffix}`（使用时间戳确保唯一性）
 - 支持并发下载控制
 
 **关键函数**：
 - `get_video_size()`: 获取视频大小（MB）
 - `download_media_to_cache()`: 下载媒体到缓存目录
 - `download_image_to_file()`: 下载图片到文件
-- `pre_download_media()`: 预先下载多个媒体（并发），支持重试逻辑
+- `pre_download_media()`: 预先下载多个媒体（并发）
   - 每个媒体项包含 `url_list`（可用URL列表）
-  - 单条直链：重试一次（总共2次尝试）
-  - 多条直链：遍历列表直到成功，不对同一条URL重试
+  - 遍历 `url_list` 中的每个URL，每个URL只尝试一次
+  - 如果某个URL成功，立即返回；如果所有URL都失败，标记为失败
 
 ### 7. FileManager (core/file_manager.py)
 
@@ -327,7 +330,6 @@ astrbot_plugin_video_parser/
 - 检查缓存目录是否可用（可写）
 - 根据文件内容或URL确定文件扩展名
 - 清理临时文件和缓存文件
-- 将临时文件移动到缓存目录
 
 **关键函数**：
 - `check_cache_dir_available()`: 检查缓存目录可用性
@@ -552,7 +554,9 @@ DownloadManager 处理
   ├─ 添加 failed_video_count: 下载失败的视频数量
   ├─ 添加 failed_image_count: 下载失败的图片数量
   ├─ 添加 use_local_files: 是否使用本地文件
-  └─ 添加 is_large_media: 是否为大媒体
+  ├─ 添加 is_large_media: 是否为大媒体
+  ├─ 添加 has_access_denied: 是否有403访问被拒绝错误
+  └─ 添加 exceeds_max_size: 是否超过最大视频大小限制
   │
   ▼
 NodeBuilder 构建
@@ -570,14 +574,14 @@ AstrBot 消息发送
 ```
 网络媒体URL
   │
-  ▼
-下载到临时文件 (tempfile)
+  ├─ 视频（大媒体）→ 下载到缓存目录 (cache_dir)
+  │   └─ 文件命名: {media_id}_{index}_{timestamp}{suffix}
+  │
+  └─ 图片 → 下载到临时文件 (tempfile)
+      └─ 临时文件路径添加到 metadata['file_paths']
   │
   ▼
-移动到缓存目录 (cache_dir)
-  │
-  ├─ 文件命名: {media_id}_{index}.{suffix}
-  └─ 文件路径添加到 metadata['file_paths']
+文件路径添加到 metadata['file_paths']
   │
   ▼
 构建消息节点 (使用本地文件路径)
@@ -717,6 +721,12 @@ if metadata.get('new_media_type'):
    - 如果HEAD请求无法获取大小，下载后会从实际文件大小检查
    - 确保 `max_video_size_mb` 配置在所有情况下都能正确生效
 
+5. **403访问被拒绝异常**：
+   - 检测到403状态码时，记录警告日志
+   - 在元数据中标记 `has_access_denied = True`
+   - 在文本节点中显示"媒体访问被拒绝(403 Forbidden)"错误信息
+   - 不中断处理流程，继续处理其他媒体
+
 ### 日志记录
 
 - 使用 AstrBot 的 `logger` 记录关键操作
@@ -779,8 +789,20 @@ if metadata.get('new_media_type'):
    - 需要获取访客cookie才能访问API
    - 支持 weibo.com、weibo.cn、video.weibo.com 等多种链接格式
    - 下载媒体时需要设置 Referer 请求头
+   - 支持 `page_url` 字段，优先使用 `page_url` 作为 Referer
 
-4. **B站**：
+4. **图片下载**：
+   - 在非预下载模式下，所有图片都会下载到临时文件
+   - 提高图片发送成功率，避免直链访问失败
+   - 临时文件在消息发送后会自动清理
+
+5. **B站**：
    - 转发动态会使用"转发动态数据（原始动态数据）"组织文本格式解析结果
+   - 支持 `page_url` 字段，优先使用 `page_url` 作为 Referer
+
+6. **文件命名**：
+   - 缓存文件使用格式：`{media_id}_{index}_{timestamp}{suffix}`
+   - 时间戳确保并发下载时文件唯一性
+   - 文件在发送后立即清理，不需要检查缓存
 
 ---

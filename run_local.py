@@ -109,7 +109,7 @@ def print_metadata(metadata: Dict[str, Any], url: str, parser_name: str):
             print(f"  ... 还有 {len(image_urls) - 5} 张")
     
     if metadata.get('is_twitter_video'):
-        print("标记: Twitter视频（需要下载）")
+        print("标记: Twitter视频")
     if metadata.get('page_url'):
         print(f"页面URL: {metadata.get('page_url')}")
     
@@ -483,7 +483,7 @@ async def parse_text(
             if result:
                 return (url, result, None)
             else:
-                return (url, None, "解析失败：未返回结果")
+                return (url, None, "未返回结果")
         except RuntimeError as e:
             error_msg = str(e)
             return (url, None, error_msg)
@@ -519,7 +519,7 @@ async def parse_text(
             else:
                 metadata_list.append({
                     'url': url,
-                    'error': '解析失败：未返回结果',
+                    'error': '未返回结果',
                     'video_urls': [],
                     'image_urls': []
                 })

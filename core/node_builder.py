@@ -59,7 +59,10 @@ def build_text_node(metadata: Dict[str, Any], max_video_size_mb: float = 0.0) ->
         text_parts.append(f"解析失败：{metadata['error']}")
 
     if has_valid_media is False and (video_urls or image_urls) and has_text_metadata and not metadata.get('exceeds_max_size'):
-        text_parts.append("解析失败：直链内未找到有效媒体")
+        if metadata.get('has_access_denied'):
+            text_parts.append("解析失败：媒体访问被拒绝(403 Forbidden)")
+        else:
+            text_parts.append("解析失败：直链内未找到有效媒体")
     
     if metadata.get('exceeds_max_size'):
         actual_video_size = metadata.get('max_video_size_mb')
@@ -71,7 +74,6 @@ def build_text_node(metadata: Dict[str, Any], max_video_size_mb: float = 0.0) ->
             else:
                 text_parts.append(f"解析失败：视频大小超过限制（{actual_video_size:.1f}MB）")
     
-    # 添加下载失败统计（在原始链接行上方）
     failed_video_count = metadata.get('failed_video_count', 0)
     failed_image_count = metadata.get('failed_image_count', 0)
     video_count = metadata.get('video_count', 0)
@@ -124,19 +126,23 @@ def build_media_nodes(
     video_urls = metadata.get('video_urls', [])
     image_urls = metadata.get('image_urls', [])
     file_paths = metadata.get('file_paths', [])
+    video_sizes = metadata.get('video_sizes', [])
     
     if not video_urls and not image_urls and not file_paths:
         return nodes
     
-    # 处理视频
     file_idx = 0
-    for url_list in video_urls:
+    for idx, url_list in enumerate(video_urls):
         if not url_list or not isinstance(url_list, list):
             continue
         
-        # 使用第一个URL（成功下载的URL）
+        if video_sizes and idx < len(video_sizes) and video_sizes[idx] is None:
+            file_idx += 1
+            continue
+        
         video_url = url_list[0] if url_list else None
         if not video_url:
+            file_idx += 1
             continue
         
         video_file_path = None
@@ -156,12 +162,10 @@ def build_media_nodes(
         
         file_idx += 1
     
-    # 处理图片
     for url_list in image_urls:
         if not url_list or not isinstance(url_list, list):
             continue
         
-        # 使用第一个URL（成功下载的URL）
         image_url = url_list[0] if url_list else None
         if not image_url:
             continue

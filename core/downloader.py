@@ -7,6 +7,7 @@ import asyncio
 import os
 import re
 import tempfile
+import time
 from typing import Dict, Any, List, Optional, Tuple
 
 import aiohttp
@@ -17,7 +18,8 @@ except ImportError:
     import logging
     logger = logging.getLogger(__name__)
 
-from .file_manager import get_image_suffix
+from .file_manager import get_image_suffix, get_video_suffix
+from .constants import Config
 
 _DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 _EMPTY_CONTENT_TYPE_CHECK_SIZE = 64
@@ -40,42 +42,31 @@ def _build_request_headers(
     Returns:
         请求头字典
     """
-    referer_url = referer if referer else (default_referer or '')
+    if custom_headers and 'Referer' in custom_headers:
+        referer_url = custom_headers['Referer']
+    else:
+        referer_url = referer if referer else (default_referer or '')
     
     if is_video:
         headers = {
-            'User-Agent': (
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                'AppleWebKit/537.36 (KHTML, like Gecko) '
-                'Chrome/120.0.0.0 Safari/537.36'
-            ),
+            'User-Agent': Config.USER_AGENT_DESKTOP,
             'Accept': '*/*',
-            'Accept-Language': (
-                'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7'
-            ),
+            'Accept-Language': Config.DEFAULT_ACCEPT_LANGUAGE,
         }
     else:
         headers = {
-            'User-Agent': (
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                'AppleWebKit/537.36 (KHTML, like Gecko) '
-                'Chrome/120.0.0.0 Safari/537.36'
-            ),
+            'User-Agent': Config.USER_AGENT_DESKTOP,
             'Accept': (
                 'image/avif,image/webp,image/apng,image/svg+xml,'
                 'image/*,*/*;q=0.8'
             ),
-            'Accept-Language': (
-                'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7'
-            ),
+            'Accept-Language': Config.DEFAULT_ACCEPT_LANGUAGE,
         }
     
     if referer_url:
         headers['Referer'] = referer_url
     
     if custom_headers:
-        if 'Referer' in custom_headers and not referer_url:
-            headers['Referer'] = custom_headers['Referer']
         headers.update(custom_headers)
     
     return headers
@@ -152,6 +143,8 @@ async def _validate_media_response(
         content_preview为已读取的内容预览（如果Content-Type为空且允许读取）
     """
     if response.status != 200:
+        if response.status == 403:
+            logger.warning(f"媒体URL访问被拒绝(403 Forbidden): {media_url}")
         return False, None
     
     content_type = response.headers.get('Content-Type', '').lower()
@@ -226,7 +219,7 @@ async def _get_media_size_from_response(
     """
     try:
         request_headers = headers or {}
-        timeout = aiohttp.ClientTimeout(total=10)
+        timeout = aiohttp.ClientTimeout(total=Config.VIDEO_SIZE_CHECK_TIMEOUT)
         
         try:
             async with session.head(
@@ -236,6 +229,10 @@ async def _get_media_size_from_response(
                 proxy=proxy,
                 allow_redirects=True
             ) as response:
+                if response.status == 403:
+                    logger.warning(f"媒体URL访问被拒绝(403 Forbidden): {media_url}")
+                    response._access_denied = True
+                
                 is_valid, _ = await _validate_media_response(
                     response, media_url, is_video, allow_read_content=False
                 )
@@ -251,6 +248,10 @@ async def _get_media_size_from_response(
                 proxy=proxy,
                 allow_redirects=True
             ) as response:
+                if response.status == 403:
+                    logger.warning(f"媒体URL访问被拒绝(403 Forbidden): {media_url}")
+                    response._access_denied = True
+                
                 is_valid, _ = await _validate_media_response(
                     response, media_url, is_video, allow_read_content=True
                 )
@@ -268,7 +269,7 @@ async def get_video_size(
     video_url: str,
     headers: dict = None,
     proxy: str = None
-) -> Optional[float]:
+) -> Tuple[Optional[float], Optional[int]]:
     """获取视频文件大小
 
     Args:
@@ -278,9 +279,55 @@ async def get_video_size(
         proxy: 代理地址（可选）
 
     Returns:
-        视频大小(MB)，如果无法获取返回None
+        (size_mb, status_code) 元组，size_mb为视频大小(MB)，如果无法获取返回None，
+        status_code为HTTP状态码（如果是403等特殊状态码），否则为None
     """
-    return await _get_media_size_from_response(session, video_url, headers, proxy, is_video=True)
+    try:
+        request_headers = headers or {}
+        timeout = aiohttp.ClientTimeout(total=Config.VIDEO_SIZE_CHECK_TIMEOUT)
+        
+        try:
+            async with session.head(
+                video_url,
+                headers=request_headers,
+                timeout=timeout,
+                proxy=proxy,
+                allow_redirects=True
+            ) as response:
+                if response.status == 403:
+                    logger.warning(f"视频URL访问被拒绝(403 Forbidden): {video_url}")
+                    return None, 403
+                size = _extract_size_from_headers(response)
+                if size is not None:
+                    return size, None
+                is_valid, _ = await _validate_media_response(
+                    response, video_url, is_video=True, allow_read_content=False
+                )
+                if not is_valid:
+                    return None, None
+                return size, None
+        except (aiohttp.ClientError, asyncio.TimeoutError):
+            async with session.get(
+                video_url,
+                headers=request_headers,
+                timeout=timeout,
+                proxy=proxy,
+                allow_redirects=True
+            ) as response:
+                if response.status == 403:
+                    logger.warning(f"视频URL访问被拒绝(403 Forbidden): {video_url}")
+                    return None, 403
+                is_valid, _ = await _validate_media_response(
+                    response, video_url, is_video=True, allow_read_content=True
+                )
+                if not is_valid:
+                    return None, None
+                size = _extract_size_from_headers(response)
+                return size, None
+    except Exception as e:
+        if '403' in str(e) or 'Forbidden' in str(e):
+            return None, 403
+        return None, None
 
 
 async def validate_media_url(
@@ -289,7 +336,7 @@ async def validate_media_url(
     headers: dict = None,
     proxy: str = None,
     is_video: bool = True
-) -> bool:
+) -> Tuple[bool, Optional[int]]:
     """验证媒体URL是否有效
 
     Args:
@@ -300,15 +347,45 @@ async def validate_media_url(
         is_video: 是否为视频（True为视频，False为图片）
 
     Returns:
-        如果媒体URL有效返回True，否则返回False
+        (is_valid, status_code) 元组，is_valid表示媒体URL是否有效，
+        status_code为HTTP状态码（如果是403等特殊状态码），否则为None
     """
     try:
-        size = await _get_media_size_from_response(
-            session, media_url, headers, proxy, is_video=is_video
-        )
-        return size is not None
-    except Exception:
-        return False
+        request_headers = headers or {}
+        timeout = aiohttp.ClientTimeout(total=Config.VIDEO_SIZE_CHECK_TIMEOUT)
+        
+        try:
+            async with session.head(
+                media_url,
+                headers=request_headers,
+                timeout=timeout,
+                proxy=proxy,
+                allow_redirects=True
+            ) as response:
+                if response.status == 403:
+                    return False, 403
+                is_valid, _ = await _validate_media_response(
+                    response, media_url, is_video, allow_read_content=False
+                )
+                return is_valid, None
+        except (aiohttp.ClientError, asyncio.TimeoutError):
+            async with session.get(
+                media_url,
+                headers=request_headers,
+                timeout=timeout,
+                proxy=proxy,
+                allow_redirects=True
+            ) as response:
+                if response.status == 403:
+                    return False, 403
+                is_valid, _ = await _validate_media_response(
+                    response, media_url, is_video, allow_read_content=True
+                )
+                return is_valid, None
+    except Exception as e:
+        if '403' in str(e) or 'Forbidden' in str(e):
+            return False, 403
+        return False, None
 
 
 async def _download_media_stream(
@@ -354,7 +431,8 @@ async def download_image_to_file(
     index: int = 0,
     headers: dict = None,
     referer: str = None,
-    default_referer: str = None
+    default_referer: str = None,
+    proxy: str = None
 ) -> Optional[str]:
     """下载图片到临时文件
 
@@ -365,6 +443,7 @@ async def download_image_to_file(
         headers: 自定义请求头（如果提供，会与默认请求头合并）
         referer: Referer URL，如果提供则使用
         default_referer: 默认Referer URL（如果referer未提供）
+        proxy: 代理地址（可选）
 
     Returns:
         临时文件路径，失败返回None
@@ -380,7 +459,8 @@ async def download_image_to_file(
         async with session.get(
             image_url,
             headers=request_headers,
-            timeout=aiohttp.ClientTimeout(total=30)
+            timeout=aiohttp.ClientTimeout(total=Config.IMAGE_DOWNLOAD_TIMEOUT),
+            proxy=proxy
         ) as response:
             response.raise_for_status()
             
@@ -447,7 +527,9 @@ async def download_media_to_cache(
             custom_headers=headers
         )
         
-        timeout = aiohttp.ClientTimeout(total=300 if is_video else 30)
+        timeout = aiohttp.ClientTimeout(
+            total=Config.VIDEO_DOWNLOAD_TIMEOUT if is_video else Config.IMAGE_DOWNLOAD_TIMEOUT
+        )
         
         async with session.get(
             media_url,
@@ -468,26 +550,15 @@ async def download_media_to_cache(
             size_mb = _extract_size_from_headers(response)
             
             if is_video:
-                suffix = ".mp4"
+                suffix = get_video_suffix(content_type, media_url)
             else:
                 suffix = get_image_suffix(content_type, media_url)
             
-            filename = f"{media_id}_{index}{suffix}"
+            timestamp = int(time.time() * 1000)
+            filename = f"{media_id}_{index}_{timestamp}{suffix}"
             file_path = os.path.join(cache_dir, filename)
             
             os.makedirs(cache_dir, exist_ok=True)
-            
-            if os.path.exists(file_path):
-                if size_mb is None:
-                    try:
-                        file_size_bytes = os.path.getsize(file_path)
-                        size_mb = file_size_bytes / (1024 * 1024)
-                    except Exception:
-                        pass
-                return {
-                    'file_path': os.path.normpath(file_path),
-                    'size_mb': size_mb
-                }
             
             if await _download_media_stream(response, file_path, content_preview):
                 if size_mb is None:
@@ -549,58 +620,28 @@ async def pre_download_media(
                         'index': index
                     }
 
-                # 新的重试逻辑
-                # 如果只有一条直链，重试一次（总共尝试2次）
-                # 如果有多条直链，遍历列表直到成功，不对同一条URL重试
-                if len(url_list) == 1:
-                    # 单条直链：重试一次
-                    url = url_list[0]
-                    for attempt in range(2):
-                        result = await download_media_to_cache(
-                            session,
-                            url,
-                            cache_dir,
-                            media_id,
-                            index,
-                            is_video,
-                            item_headers,
-                            item_referer,
-                            item_default_referer,
-                            item_proxy
-                        )
-                        if result:
-                            return {
-                                'url': url,
-                                'file_path': result.get('file_path'),
-                                'size_mb': result.get('size_mb'),
-                                'success': True,
-                                'index': index
-                            }
-                else:
-                    # 多条直链：遍历列表直到成功
-                    for url in url_list:
-                        result = await download_media_to_cache(
-                            session,
-                            url,
-                            cache_dir,
-                            media_id,
-                            index,
-                            is_video,
-                            item_headers,
-                            item_referer,
-                            item_default_referer,
-                            item_proxy
-                        )
-                        if result:
-                            return {
-                                'url': url_list[0],  # 返回第一个URL作为标识
-                                'file_path': result.get('file_path'),
-                                'size_mb': result.get('size_mb'),
-                                'success': True,
-                                'index': index
-                            }
+                for url in url_list:
+                    result = await download_media_to_cache(
+                        session,
+                        url,
+                        cache_dir,
+                        media_id,
+                        index,
+                        is_video,
+                        item_headers,
+                        item_referer,
+                        item_default_referer,
+                        item_proxy
+                    )
+                    if result:
+                        return {
+                            'url': url_list[0],
+                            'file_path': result.get('file_path'),
+                            'size_mb': result.get('size_mb'),
+                            'success': True,
+                            'index': index
+                        }
                 
-                # 所有尝试都失败
                 return {
                     'url': url_list[0] if url_list else None,
                     'file_path': None,

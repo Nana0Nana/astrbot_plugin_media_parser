@@ -180,19 +180,19 @@ class TwitterParser(BaseVideoParser):
                     return media_urls
             except aiohttp.ClientResponseError as e:
                 if e.status < 500:
-                    raise RuntimeError(f"解析失败：HTTP {e.status} {e.message}")
+                    raise RuntimeError(f"HTTP {e.status} {e.message}")
                 last_exception = e
             except (aiohttp.ClientError, asyncio.TimeoutError, aiohttp.ServerTimeoutError) as e:
                 last_exception = e
             except Exception as e:
-                raise RuntimeError(f"解析失败：{str(e)}")
+                raise RuntimeError(str(e))
 
             if attempt < max_retries:
                 delay = retry_delay * (2 ** attempt)
                 await asyncio.sleep(delay)
             else:
                 error_msg = str(last_exception) if last_exception else "未知错误"
-                raise RuntimeError(f"解析失败：{error_msg}（已重试{max_retries}次）")
+                raise RuntimeError(f"{error_msg}（已重试{max_retries}次）")
 
 
     async def parse(
@@ -226,7 +226,7 @@ class TwitterParser(BaseVideoParser):
             timestamp = media_info.get('timestamp', '')
             
             if not images and not videos:
-                raise RuntimeError("解析失败：推文不包含图片或视频")
+                raise RuntimeError("推文不包含图片或视频")
             
             video_urls = []
             image_urls = []
@@ -265,7 +265,7 @@ class TwitterParser(BaseVideoParser):
                 }
             else:
                 if not image_urls:
-                    raise RuntimeError("解析失败：推文不包含图片")
+                    raise RuntimeError("推文不包含图片")
                 
                 return {
                     "url": url,

@@ -11,8 +11,12 @@
 - 配置 **缓存目录** 
 - 打开 **预下载模式**  
 
-> 由于消息平台使用直链发送媒体的局限性（无法指定 header、referer、cookie 等参数）：  
-> 部分风控严格的平台会返回 403 Forbidden，此时需要先将媒体下载到本地再发送
+> **由于消息平台使用直链发送媒体的局限性（无法指定 header、referer、cookie 等参数）：**
+> - 部分风控严格的平台会返回 403 Forbidden，此时需要先将媒体下载到本地再发送  
+> 
+> **已知受影响的平台包括：**
+> - 部分小红书媒体（视频/图片）  
+> - 全部微博视频
 
 ---
 
@@ -248,7 +252,7 @@
 <tr>
 <td>是否启用推特解析器</td>
 <td class="center"><code>bool</code></td>
-<td class="center"><code>true</code></td>
+<td class="center"><code>false</code></td>
 <td>-</td>
 </tr>
 </tbody>
