@@ -24,7 +24,7 @@
 
 - 解析配置文件中的各项设置（触发设置、视频大小设置、下载设置等）
 - 根据配置创建并初始化各个平台的解析器
-- 管理代理配置（特别是Twitter平台的代理设置）
+- 管理代理配置（小黑盒和Twitter平台的代理设置）
 - 验证配置有效性（如确保至少启用一个解析器）
 
 #### 2. 解析器模块 (Parser)
@@ -42,9 +42,10 @@
 - 过滤重复链接和无效链接
 
 **平台解析器 (Handler)**
-- 各平台的具体解析器实现（B站、抖音、快手、微博、小红书、推特等）
+- 各平台的具体解析器实现（B站、抖音、快手、微博、小红书、小黑盒、推特等）
 - 每个解析器负责识别平台链接、提取元数据、获取媒体直链
 - 返回标准化的元数据格式
+- 支持的平台：BilibiliParser、DouyinParser、KuaishouParser、WeiboParser、XiaohongshuParser、XiaoheiheParser、TwitterParser
 
 #### 3. 下载器模块 (Downloader)
 
@@ -75,8 +76,9 @@
 负责构建和发送消息。包含以下子模块：
 
 **消息管理器 (MessageManager)**
-- 协调节点构建和消息发送的完整流程
-- 提供统一的接口供主流程调用
+- 提供节点构建和消息发送的接口
+- 根据配置选择打包或非打包发送方式
+- 管理发送者信息的获取
 
 **节点构建器 (NodeBuilder)**
 - 从元数据构建文本节点（标题、作者、简介等）
@@ -167,10 +169,12 @@ graph TB
 
 解析器管理器，负责：
 
-- 管理解析器列表的注册和查找
+- 管理解析器列表的查找
 - 从文本中提取所有可解析链接
 - 并发执行多个链接的解析任务
 - 处理解析异常和错误结果
+
+**注意：** 解析器在初始化时通过构造函数传入，不支持动态注册。
 
 #### DownloadManager
 
@@ -186,10 +190,9 @@ graph TB
 
 消息管理器，负责：
 
-- 从元数据构建消息节点
-- 根据配置选择打包或非打包发送方式
-- 处理大媒体的单独发送逻辑
-- 管理发送过程中的资源清理
+- 获取发送者信息
+- 调用节点构建器构建消息节点
+- 根据配置选择打包或非打包发送方式（委托给MessageSender）
 
 ---
 
@@ -218,19 +221,22 @@ graph TB
 
 - 使用LinkRouter从文本中提取所有可解析的链接
 - 每个解析器尝试匹配链接，找到对应的解析器
-- 过滤重复链接（相同链接只解析一次）
-- 如果文本包含"原始链接："标记，跳过提取（防止重复解析）
+- 返回(链接, 解析器)元组列表，按在文本中出现的位置排序
+- 如果没有提取到链接，直接返回，不继续后续流程
 
 #### 3. 元数据解析（并发处理）
 
 **执行者：** `ParserManager.parse_text()`
 
-- 对去重后的链接列表，并发调用对应的解析器进行解析
+- 调用extract_all_links提取所有可解析链接，然后通过_deduplicate_links对链接进行去重
+- 对去重后的链接字典，并发调用对应的解析器进行解析
 - 每个解析器返回标准化的元数据，包含：
   - 基本信息：标题、作者、简介、发布时间
   - 媒体信息：视频URL列表、图片URL列表
   - 下载配置：是否需要预下载、请求头信息、代理配置
-- 解析失败时，在元数据中标记错误信息，不中断其他链接的解析
+  - 平台信息：platform字段标识来源平台
+- 解析失败时，在元数据中标记错误信息（error字段），不中断其他链接的解析
+- SkipParse异常会被跳过，不添加到结果列表
 
 #### 4. 媒体下载和处理
 
@@ -313,12 +319,14 @@ flowchart TD
     
     ExtractLinks --> HasLinks{是否有链接?}
     HasLinks -->|否| End1
-    HasLinks -->|是| SendNotice[发送提示消息]
+    HasLinks -->|是| ParseText[解析文本中的所有链接<br/>parse_text去重并并发解析]
     
-    SendNotice --> ParseConcurrent[并发解析所有链接]
-    ParseConcurrent --> HasMetadata{是否有元数据?}
+    ParseText --> HasMetadata{是否有元数据?}
     HasMetadata -->|否| End1
-    HasMetadata -->|是| ProcessConcurrent[并发处理元数据]
+    HasMetadata -->|是| HasValid{是否有有效元数据?<br/>无错误且有媒体}
+    HasValid -->|否| End1
+    HasValid -->|是| SendNotice[发送提示消息]
+    SendNotice --> ProcessConcurrent[并发处理元数据]
     
     ProcessConcurrent --> CheckPreDownload{需要预下载?}
     CheckPreDownload -->|是且未启用| SkipMedia[跳过媒体]

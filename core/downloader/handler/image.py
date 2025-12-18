@@ -1,8 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-图片处理模块
-负责下载图片到文件（支持缓存目录或临时文件）
-"""
 import os
 import tempfile
 from typing import Optional

@@ -1,8 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-基础下载处理器
-包含通用下载逻辑
-"""
 import os
 from typing import Optional, Callable, Dict, Any, Tuple
 

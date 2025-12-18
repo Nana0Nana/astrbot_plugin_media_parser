@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+
 import asyncio
 import json
 import re
@@ -15,7 +16,7 @@ except ImportError:
     logger = logging.getLogger(__name__)
 
 from .base import BaseVideoParser
-from ..utils import build_request_headers
+from ..utils import build_request_headers, is_live_url, SkipParse
 
 MOBILE_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) '
@@ -29,7 +30,6 @@ MOBILE_HEADERS = {
 
 
 class KuaishouParser(BaseVideoParser):
-    """快手视频解析器"""
 
     def __init__(self):
         """初始化快手解析器"""
@@ -81,18 +81,6 @@ class KuaishouParser(BaseVideoParser):
         else:
             logger.debug(f"[{self.name}] extract_links: 未提取到链接")
         return result
-
-    def _extract_media_id(self, url: str) -> str:
-        """从URL中提取媒体ID
-
-        Args:
-            url: 快手URL
-
-        Returns:
-            媒体ID，如果无法提取则返回"kuaishou"
-        """
-        video_id_match = re.search(r'/(\w+)(?:\.html|/|\?|$)', url)
-        return video_id_match.group(1) if video_id_match else "kuaishou"
 
     def _min_mp4(self, url: str) -> str:
         """处理MP4 URL，提取最小格式
@@ -359,11 +347,17 @@ class KuaishouParser(BaseVideoParser):
                 loc = r1.headers.get('Location')
                 if not loc:
                     return None
+            if is_live_url(loc):
+                logger.debug(f"[{self.name}] _fetch_html: 短链重定向到直播域名，跳过解析 {url} -> {loc}")
+                raise SkipParse("直播域名链接不解析")
             async with session.get(loc, headers=self.headers) as r2:
                 if r2.status != 200:
                     return None
                 return await r2.text()
         else:
+            if is_live_url(url):
+                logger.debug(f"[{self.name}] _fetch_html: 检测到直播域名链接，跳过解析 {url}")
+                raise SkipParse("直播域名链接不解析")
             async with session.get(url, headers=self.headers) as r:
                 if r.status != 200:
                     return None

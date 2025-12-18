@@ -1,8 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-链接清洗分流器
-用于从文本中匹配可解析的链接并确定链接该传入什么解析器
-"""
+
 from typing import List, Tuple
 
 try:
@@ -12,10 +9,10 @@ except ImportError:
     logger = logging.getLogger(__name__)
 
 from .handler.base import BaseVideoParser
+from .utils import is_live_url
 
 
 class LinkRouter:
-    """链接清洗分流器，负责从文本中提取链接并匹配解析器"""
 
     def __init__(self, parsers: List[BaseVideoParser]):
         """初始化链接清洗分流器
@@ -52,6 +49,9 @@ class LinkRouter:
             if links:
                 logger.debug(f"解析器 {parser.name} 提取到 {len(links)} 个链接")
             for link in links:
+                if is_live_url(link):
+                    logger.debug(f"提取到直播域名链接，跳过: {link}")
+                    continue
                 position = text.find(link)
                 if position != -1:
                     links_with_position.append((position, link, parser))
@@ -85,6 +85,9 @@ class LinkRouter:
             ValueError: 当找不到匹配的解析器时
         """
         logger.debug(f"查找URL的解析器: {url}")
+        if is_live_url(url):
+            logger.debug(f"检测到直播域名链接，跳过解析: {url}")
+            raise ValueError(f"直播域名链接不解析: {url}")
         for parser in self.parsers:
             if parser.can_parse(url):
                 logger.debug(f"找到匹配的解析器: {parser.name} for {url}")

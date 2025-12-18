@@ -1,8 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-下载工具模块
-包含纯工具函数，无HTTP请求，无业务逻辑
-"""
 import os
 import re
 from typing import Optional

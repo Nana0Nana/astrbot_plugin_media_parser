@@ -1,9 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-本地工作流测试脚本
-用于测试完整的解析和下载工作流
-导入常量、解析器和下载器包，使用管理器进行测试
-"""
 import sys
 import os
 import logging
@@ -35,8 +30,8 @@ try:
         KuaishouParser,
         WeiboParser,
         XiaohongshuParser,
-        TwitterParser,
-        XiaoheiheParser
+        XiaoheiheParser,
+        TwitterParser
     )
 except ImportError as e:
     logger.error(f"导入模块失败: {e}")

@@ -1,8 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-文件清理模块
-负责清理本地文件和目录
-"""
+
 import os
 import shutil
 from typing import List, Optional

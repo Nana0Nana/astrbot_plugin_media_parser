@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+
 import asyncio
 import json
 import re
@@ -15,7 +16,7 @@ except ImportError:
     logger = logging.getLogger(__name__)
 
 from .base import BaseVideoParser
-from ..utils import build_request_headers
+from ..utils import build_request_headers, is_live_url, SkipParse
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -61,7 +62,6 @@ def av2bv(av: int) -> str:
 
 
 class BilibiliParser(BaseVideoParser):
-    """B站视频解析器"""
 
     def __init__(self):
         """初始化B站解析器"""
@@ -1214,6 +1214,10 @@ class BilibiliParser(BaseVideoParser):
         page_url = await self.expand_b23(url, session)
         if page_url != url:
             logger.debug(f"[{self.name}] parse_bilibili_minimal: b23短链展开 {url} -> {page_url}")
+
+        if is_live_url(page_url) or is_live_url(original_url):
+            logger.debug(f"[{self.name}] parse_bilibili_minimal: 检测到直播域名链接，跳过解析 {original_url} -> {page_url}")
+            raise SkipParse("直播域名链接不解析")
 
         page_url_lower = page_url.lower()
         if '/opus/' in page_url_lower or 't.bilibili.com' in page_url_lower:

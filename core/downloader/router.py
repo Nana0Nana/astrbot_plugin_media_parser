@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+
 import re
 from typing import Optional, Dict, Any, Literal
 
@@ -10,6 +11,14 @@ from .handler.m3u8 import M3U8Handler
 
 
 def detect_media_type(url: str) -> Literal['m3u8', 'image', 'video']:
+    """检测媒体类型
+
+    Args:
+        url: 媒体URL
+
+    Returns:
+        媒体类型：'m3u8'、'image' 或 'video'
+    """
     if not url:
         return 'video'
     
@@ -63,6 +72,23 @@ async def download_media(
     m3u8_handler: Optional[M3U8Handler] = None,
     use_ffmpeg: bool = True
 ) -> Optional[Dict[str, Any]]:
+    """下载媒体文件
+
+    Args:
+        session: aiohttp会话
+        media_url: 媒体URL
+        media_type: 媒体类型（可选，如果不提供会自动检测）
+        cache_dir: 缓存目录
+        media_id: 媒体ID
+        index: 媒体索引
+        headers: 请求头字典
+        proxy: 代理地址（可选）
+        m3u8_handler: M3U8处理器（可选）
+        use_ffmpeg: 是否使用ffmpeg（仅用于M3U8）
+
+    Returns:
+        下载结果字典，包含file_path和size_mb字段，失败返回None
+    """
     if media_type is None:
         media_type = detect_media_type(media_url)
     

@@ -1,8 +1,73 @@
 # -*- coding: utf-8 -*-
-"""
-解析器工具模块
-包含纯工具函数，无HTTP请求，无业务逻辑
-"""
+
+from __future__ import annotations
+
+from urllib.parse import parse_qs, unquote, urlparse
+
+
+class SkipParse(Exception):
+    pass
+
+
+def _ensure_url_has_scheme(url: str) -> str:
+    """确保URL带有scheme，便于urlparse正确解析hostname。"""
+    if not url:
+        return url
+    u = url.strip()
+    if u.startswith("//"):
+        return "https:" + u
+    if u.startswith(("http://", "https://")):
+        return u
+    return "https://" + u
+
+
+def _is_live_url_basic(url: str) -> bool:
+    """仅基于hostname标签判断是否为live域名。"""
+    parsed = urlparse(_ensure_url_has_scheme(url))
+    host = (parsed.hostname or "").strip(".").lower()
+    if not host:
+        return False
+    labels = [x for x in host.split(".") if x]
+    return "live" in labels
+
+
+def is_live_url(url: str) -> bool:
+    """判断是否为直播类型链接或“跳转到直播”的重定向链接。
+
+    规则：
+    - 直链：hostname 的任意标签为 live，则判定为直播域名链接
+    - 重定向：若URL的 query 参数里包含一个可解码出的URL，且该URL为直播域名链接，则也判定为直播
+
+    例：
+    - https://live.bilibili.com/ -> True
+    - https://api.live.bilibili.com/ -> True
+    - https://example.com/redirect?url=https%3A%2F%2Flive.example.com%2Froom -> True
+    - https://www.douyin.com/ -> False
+    """
+    if not url:
+        return False
+    try:
+        if _is_live_url_basic(url):
+            return True
+
+        parsed = urlparse(_ensure_url_has_scheme(url))
+        qs = parse_qs(parsed.query, keep_blank_values=True)
+        for values in qs.values():
+            for v in values:
+                if not v:
+                    continue
+                candidate = v.strip()
+                for _ in range(3):
+                    if _is_live_url_basic(candidate):
+                        return True
+                    new_candidate = unquote(candidate)
+                    if new_candidate == candidate:
+                        break
+                    candidate = new_candidate
+
+        return False
+    except Exception:
+        return False
 
 
 def build_request_headers(

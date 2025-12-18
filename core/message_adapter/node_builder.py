@@ -1,9 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-节点构建模块
-负责从元数据构建astrbot消息节点
-集中所有 astrbot 消息组件的导入
-"""
 import os
 from typing import Dict, Any, List, Optional, Tuple, Union
 
@@ -217,8 +212,6 @@ def build_media_nodes(
 def build_nodes_for_link(
     metadata: Dict[str, Any],
     use_local_files: bool = False,
-    sender_name: str = "",
-    sender_id: Any = None,
     max_video_size_mb: float = 0.0
 ) -> List[Union[Plain, Image, Video]]:
     """构建单个链接的节点列表
@@ -226,8 +219,6 @@ def build_nodes_for_link(
     Args:
         metadata: 元数据字典
         use_local_files: 是否使用本地文件
-        sender_name: 发送者名称（未使用，保留兼容性）
-        sender_id: 发送者ID（未使用，保留兼容性）
         max_video_size_mb: 最大允许的视频大小(MB)，用于显示详细的错误信息
 
     Returns:
@@ -268,8 +259,6 @@ def is_pure_image_gallery(nodes: List[Union[Plain, Image, Video]]) -> bool:
 def build_all_nodes(
     metadata_list: List[Dict[str, Any]],
     is_auto_pack: bool,
-    sender_name: str,
-    sender_id: Any,
     large_video_threshold_mb: float = 0.0,
     max_video_size_mb: float = 0.0
 ) -> Tuple[List[List[Union[Plain, Image, Video]]], List[Dict], List[str], List[str]]:
@@ -278,8 +267,6 @@ def build_all_nodes(
     Args:
         metadata_list: 元数据列表
         is_auto_pack: 是否打包为Node
-        sender_name: 发送者名称
-        sender_id: 发送者ID
         large_video_threshold_mb: 大视频阈值(MB)
         max_video_size_mb: 最大允许的视频大小(MB)，用于显示错误信息
 
@@ -313,8 +300,6 @@ def build_all_nodes(
         link_nodes = build_nodes_for_link(
             metadata,
             use_local_files,
-            sender_name,
-            sender_id,
             max_video_size_mb
         )
         

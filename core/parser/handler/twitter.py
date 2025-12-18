@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+
 import asyncio
 import re
 from datetime import datetime
@@ -17,7 +18,6 @@ from ..utils import build_request_headers
 
 
 class TwitterParser(BaseVideoParser):
-    """Twitter/X 视频解析器"""
 
     def __init__(
         self,

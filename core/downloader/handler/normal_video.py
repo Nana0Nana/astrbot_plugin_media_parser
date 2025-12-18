@@ -1,8 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-普通视频处理模块
-负责下载普通视频到缓存目录
-"""
 import asyncio
 import os
 import time

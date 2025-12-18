@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+
 import asyncio
 import json
 from typing import Any, Dict
@@ -27,7 +28,7 @@ from .core.config_manager import ConfigManager
     "astrbot_plugin_media_parser",
     "drdon1234",
     "聚合解析流媒体平台链接，转换为媒体直链发送",
-    "3.2.0"
+    "4.0.0"
 )
 class VideoParserPlugin(Star):
 
@@ -65,7 +66,6 @@ class VideoParserPlugin(Star):
         )
         
         self.proxy_addr = self.config_manager.proxy_addr
-        self.twitter_proxy_config = self.config_manager.get_twitter_proxy_config()
         
         self.message_manager = MessageManager(logger=self.logger)
 
@@ -128,7 +128,6 @@ class VideoParserPlugin(Star):
         if self.debug_mode:
             self.logger.debug(f"提取到 {len(links_with_parser)} 个可解析链接: {[link for link, _ in links_with_parser]}")
         
-        await event.send(event.plain_result("流媒体解析bot为您服务 ٩( 'ω' )و"))
         sender_name, sender_id = self.message_manager.get_sender_info(event)
         
         timeout = aiohttp.ClientTimeout(total=Config.DEFAULT_TIMEOUT)
@@ -141,6 +140,19 @@ class VideoParserPlugin(Star):
                 if self.debug_mode:
                     self.logger.debug("解析后未获得任何元数据")
                 return
+            
+            has_valid_metadata = any(
+                not metadata.get('error') and 
+                (bool(metadata.get('video_urls')) or bool(metadata.get('image_urls')))
+                for metadata in metadata_list
+            )
+            
+            if not has_valid_metadata:
+                if self.debug_mode:
+                    self.logger.debug("解析后未获得任何有效元数据（可能是直播链接或解析失败）")
+                return
+            
+            await event.send(event.plain_result("流媒体解析bot为您服务 ٩( 'ω' )و"))
             
             if self.debug_mode:
                 self.logger.debug(f"解析获得 {len(metadata_list)} 条元数据")
@@ -160,7 +172,7 @@ class VideoParserPlugin(Star):
                     metadata: 元数据字典
 
                 Returns:
-                    处理后的元数据字典
+                    处理后的元数据字典（始终返回字典，异常时包含error字段）
                 """
                 if metadata.get('error'):
                     return metadata
@@ -183,10 +195,12 @@ class VideoParserPlugin(Star):
             processed_metadata_list = []
             for i, result in enumerate(results):
                 if isinstance(result, Exception):
+                    # 这种情况理论上不应该发生，因为process_single_metadata内部已经捕获了所有异常
+                    # 但为了防御性编程，仍然处理这种情况
                     metadata = metadata_list[i] if i < len(metadata_list) else {}
                     error_msg = str(result)
                     self.logger.exception(
-                        f"处理元数据失败: {metadata.get('url', '未知URL')}, "
+                        f"处理元数据时发生未捕获的异常: {metadata.get('url', '未知URL')}, "
                         f"错误类型: {type(result).__name__}, 错误: {error_msg}"
                     )
                     metadata['error'] = error_msg
@@ -194,6 +208,7 @@ class VideoParserPlugin(Star):
                 elif isinstance(result, dict):
                     processed_metadata_list.append(result)
                 else:
+                    # 处理意外的返回类型
                     metadata = metadata_list[i] if i < len(metadata_list) else {}
                     error_msg = f'未知错误类型: {type(result).__name__}'
                     self.logger.warning(
@@ -209,8 +224,6 @@ class VideoParserPlugin(Star):
                 all_link_nodes, link_metadata, temp_files, video_files = self.message_manager.build_nodes(
                     processed_metadata_list,
                     self.is_auto_pack,
-                    sender_name,
-                    sender_id,
                     self.large_video_threshold_mb,
                     self.max_video_size_mb
                 )

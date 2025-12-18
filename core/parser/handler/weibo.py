@@ -1,8 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-微博解析器
-继承自 BaseVideoParser，实现微博链接的解析功能
-"""
 import json
 import re
 from datetime import datetime
@@ -22,7 +18,6 @@ from ..utils import build_request_headers
 
 
 class WeiboParser(BaseVideoParser):
-    """微博解析器"""
 
     URL_PATTERNS = {
         'weibo_com': [
@@ -601,7 +596,7 @@ class WeiboParser(BaseVideoParser):
 
         pic_infos = json_data.get('pic_infos', {})
         if pic_infos:
-            for pic_id, pic_info in pic_infos.items():
+            for pic_info in pic_infos.values():
                 pic_type = pic_info.get('type', '')
 
                 if pic_type == 'gif' and pic_info.get('video'):

@@ -1,8 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-解析器管理器
-负责管理和调度解析器
-"""
+
 import asyncio
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -16,10 +13,10 @@ except ImportError:
 
 from .handler.base import BaseVideoParser
 from .router import LinkRouter
+from .utils import SkipParse, is_live_url
 
 
 class ParserManager:
-    """解析器管理器，负责管理和调度解析器"""
 
     def __init__(self, parsers: List[BaseVideoParser]):
         """初始化解析器管理器
@@ -35,16 +32,6 @@ class ParserManager:
         self.parsers = parsers
         self.logger = logger
         self.link_router = LinkRouter(parsers)
-
-    def register_parser(self, parser: BaseVideoParser):
-        """注册新的解析器
-
-        Args:
-            parser: 解析器实例
-        """
-        if parser not in self.parsers:
-            self.parsers.append(parser)
-            self.link_router = LinkRouter(self.parsers)
 
     def find_parser(self, url: str) -> Optional[BaseVideoParser]:
         """根据URL查找合适的解析器
@@ -92,40 +79,6 @@ class ParserManager:
                 unique_links[link] = parser
         return unique_links
 
-    async def parse_url(
-        self,
-        url: str,
-        session: aiohttp.ClientSession
-    ) -> Optional[Dict[str, Any]]:
-        """解析单个URL
-
-        Args:
-            url: 视频链接
-            session: aiohttp会话
-
-        Returns:
-            解析结果字典（元数据），如果无法解析返回None
-        """
-        parser = self.find_parser(url)
-        if parser is None:
-            self.logger.debug(f"未找到匹配的解析器: {url}")
-            return None
-        self.logger.debug(f"使用解析器 {parser.name} 解析URL: {url}")
-        try:
-            result = await parser.parse(session, url)
-            if result:
-                if 'platform' not in result:
-                    result['platform'] = parser.name
-                self.logger.debug(
-                    f"解析成功: {url}, "
-                    f"视频: {len(result.get('video_urls', []))}, "
-                    f"图片: {len(result.get('image_urls', []))}"
-                )
-            return result
-        except Exception as e:
-            self.logger.exception(f"解析URL失败: {url}, 错误: {e}")
-            return None
-
     async def parse_text(
         self,
         text: str,
@@ -156,6 +109,9 @@ class ParserManager:
             url = list(unique_links.keys())[i]
             parser = unique_links[url]
             if isinstance(result, Exception):
+                if isinstance(result, SkipParse):
+                    self.logger.debug(f"跳过解析: {url}, 原因: {result}")
+                    continue
                 self.logger.exception(f"解析URL失败: {url}, 错误: {result}")
                 metadata_list.append({
                     'url': url,

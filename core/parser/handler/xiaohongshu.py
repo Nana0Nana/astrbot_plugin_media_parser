@@ -1,3 +1,4 @@
+
 import asyncio
 import json
 import re
@@ -14,7 +15,7 @@ except ImportError:
     logger = logging.getLogger(__name__)
 
 from .base import BaseVideoParser
-from ..utils import build_request_headers
+from ..utils import build_request_headers, is_live_url, SkipParse
 
 
 ANDROID_UA = (
@@ -31,10 +32,6 @@ PC_UA = (
 
 
 class XiaohongshuParser(BaseVideoParser):
-    """小红书链接解析器
-    
-    支持解析小红书移动端和PC端链接，自动识别链接类型并使用相应的解析策略。
-    """
 
     def __init__(self):
         """初始化小红书解析器"""
@@ -482,6 +479,10 @@ class XiaohongshuParser(BaseVideoParser):
                 full_url = url
                 if not full_url.startswith("http://") and not full_url.startswith("https://"):
                     full_url = "https://" + full_url
+
+            if is_live_url(full_url) or is_live_url(url):
+                logger.debug(f"[{self.name}] parse: 检测到直播域名链接，跳过解析 {url} -> {full_url}")
+                raise SkipParse("直播域名链接不解析")
 
             full_url = self._clean_share_url(full_url)
 

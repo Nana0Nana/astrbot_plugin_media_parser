@@ -1,9 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-消息发送模块
-统一管理消息发送逻辑
-集中所有 astrbot 消息组件和事件相关的导入
-"""
 from typing import Any, List
 
 from astrbot.api.event import AstrMessageEvent
@@ -14,7 +9,6 @@ from ..file_cleaner import cleanup_files
 
 
 class MessageSender:
-    """消息发送器，负责统一管理消息发送逻辑"""
 
     def __init__(self, logger=None):
         """初始化消息发送器

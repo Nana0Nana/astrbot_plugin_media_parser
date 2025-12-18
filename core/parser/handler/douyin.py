@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+
 import asyncio
 import json
 import re
@@ -14,11 +15,10 @@ except ImportError:
     logger = logging.getLogger(__name__)
 
 from .base import BaseVideoParser
-from ..utils import build_request_headers
+from ..utils import build_request_headers, is_live_url, SkipParse
 
 
 class DouyinParser(BaseVideoParser):
-    """抖音视频解析器"""
 
     def __init__(self):
         """初始化抖音解析器"""
@@ -102,22 +102,6 @@ class DouyinParser(BaseVideoParser):
         else:
             logger.debug(f"[{self.name}] extract_links: 未提取到链接")
         return result
-
-    def _extract_media_id(self, url: str) -> str:
-        """从URL中提取媒体ID
-
-        Args:
-            url: 抖音URL
-
-        Returns:
-            媒体ID，如果无法提取则返回"douyin"
-        """
-        video_id_match = (
-            re.search(r'/note/(\d+)', url) or
-            re.search(r'/video/(\d+)', url) or
-            re.search(r'(\d{19})', url)
-        )
-        return video_id_match.group(1) if video_id_match else "douyin"
 
     def extract_router_data(self, text: str) -> Optional[str]:
         """从HTML中提取ROUTER_DATA
@@ -214,7 +198,7 @@ class DouyinParser(BaseVideoParser):
                             len(img['url_list']) > 0):
                         url_list = img['url_list']
                         valid_urls = []
-                        for url_idx, img_url in enumerate(url_list):
+                        for img_url in url_list:
                             if (img_url and
                                     isinstance(img_url, str) and
                                     img_url.startswith(
@@ -306,6 +290,9 @@ class DouyinParser(BaseVideoParser):
             redirected_url = await self.get_redirected_url(session, url)
             if redirected_url != url:
                 logger.debug(f"[{self.name}] parse: URL重定向 {url} -> {redirected_url}")
+            if is_live_url(redirected_url) or is_live_url(url):
+                logger.debug(f"[{self.name}] parse: 检测到直播域名链接，跳过解析 {url} -> {redirected_url}")
+                raise SkipParse("直播域名链接不解析")
             is_note = '/note/' in redirected_url or '/note/' in url
             note_id = None
             if is_note:

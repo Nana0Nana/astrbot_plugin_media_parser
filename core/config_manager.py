@@ -1,9 +1,6 @@
 # -*- coding: utf-8 -*-
-"""
-配置管理模块
-负责读取和处理配置文件
-"""
-from typing import List, Dict, Any
+
+from typing import List
 
 try:
     from astrbot.api import logger
@@ -18,13 +15,12 @@ from .parser.handler import (
     KuaishouParser,
     WeiboParser,
     XiaohongshuParser,
-    TwitterParser,
-    XiaoheiheParser
+    XiaoheiheParser,
+    TwitterParser
 )
 
 
 class ConfigManager:
-    """配置管理器，负责解析和处理配置"""
 
     def __init__(self, config: dict):
         """初始化配置管理器
@@ -99,6 +95,10 @@ class ConfigManager:
         
         proxy_settings = self._config.get("proxy_settings", {})
         self.proxy_addr = proxy_settings.get("proxy_addr", "")
+        
+        xiaoheihe_proxy = proxy_settings.get("xiaoheihe", {})
+        self.xiaoheihe_use_video_proxy = xiaoheihe_proxy.get("video", False)
+        
         twitter_proxy = proxy_settings.get("twitter", {})
         self.twitter_use_parse_proxy = twitter_proxy.get("parse", False)
         self.twitter_use_image_proxy = twitter_proxy.get("image", False)
@@ -132,7 +132,10 @@ class ConfigManager:
         if self.enable_xiaohongshu:
             parsers.append(XiaohongshuParser())
         if self.enable_xiaoheihe:
-            parsers.append(XiaoheiheParser())
+            parsers.append(XiaoheiheParser(
+                use_video_proxy=self.xiaoheihe_use_video_proxy,
+                proxy_url=self.proxy_addr if self.proxy_addr else None
+            ))
         if self.enable_twitter:
             parsers.append(TwitterParser(
                 use_parse_proxy=self.twitter_use_parse_proxy,
@@ -148,15 +151,4 @@ class ConfigManager:
             )
         
         return parsers
-
-    def get_twitter_proxy_config(self) -> Dict[str, bool]:
-        """获取Twitter代理配置
-
-        Returns:
-            Twitter代理配置字典
-        """
-        return {
-            "image": self.twitter_use_image_proxy,
-            "video": self.twitter_use_video_proxy
-        }
 

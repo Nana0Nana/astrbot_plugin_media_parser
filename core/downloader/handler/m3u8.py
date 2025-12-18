@@ -1,8 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-M3U8 媒体处理模块
-负责解析和下载 M3U8 格式的视频流
-"""
 import asyncio
 import os
 import re
@@ -25,7 +21,6 @@ from ...file_cleaner import cleanup_directory
 
 
 class M3U8Handler:
-    """M3U8 媒体处理器"""
 
     def __init__(
         self,

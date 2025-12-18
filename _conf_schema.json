@@ -93,6 +93,11 @@
                 "type": "bool",
                 "default": true
             },
+            "enable_xiaoheihe": {
+                "description": "是否启用小黑盒解析器",
+                "type": "bool",
+                "default": true
+            },
             "enable_twitter": {
                 "description": "是否启用Twitter/X解析器",
                 "type": "bool",
@@ -109,6 +114,18 @@
                 "type": "string",
                 "hint": "代理地址格式：http://host:port 或 socks5://host:port。所有解析器共用此代理地址",
                 "default": ""
+            },
+            "xiaoheihe": {
+                "description": "小黑盒代理设置",
+                "type": "object",
+                "items": {
+                    "video": {
+                        "description": "小黑盒视频下载是否使用代理",
+                        "type": "bool",
+                        "hint": "启用后，小黑盒视频下载将通过代理进行",
+                        "default": false
+                    }
+                }
             },
             "twitter": {
                 "description": "Twitter代理设置",
@@ -130,30 +147,6 @@
                         "description": "Twitter视频下载是否使用代理",
                         "type": "bool",
                         "hint": "启用后，Twitter视频下载将通过代理进行。视频CDN几乎不受影响，通常无需开启以节约流量",
-                        "default": false
-                    }
-                }
-            },
-            "xiaoheihe": {
-                "description": "小黑盒代理设置（预留）",
-                "type": "object",
-                "items": {
-                    "parse": {
-                        "description": "小黑盒解析是否使用代理",
-                        "type": "bool",
-                        "hint": "启用后，小黑盒API请求将通过代理进行",
-                        "default": false
-                    },
-                    "image": {
-                        "description": "小黑盒图片下载是否使用代理",
-                        "type": "bool",
-                        "hint": "启用后，小黑盒图片下载将通过代理进行",
-                        "default": false
-                    },
-                    "video": {
-                        "description": "小黑盒视频下载是否使用代理",
-                        "type": "bool",
-                        "hint": "启用后，小黑盒视频下载将通过代理进行",
                         "default": false
                     }
                 }

@@ -1,8 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-基础解析器抽象类
-只负责将url解析为元数据表
-"""
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any, List
 
@@ -16,7 +12,6 @@ except ImportError:
 
 
 class BaseVideoParser(ABC):
-    """视频解析器基类，只负责解析URL返回元数据"""
 
     def __init__(self, name: str):
         """初始化视频解析器基类

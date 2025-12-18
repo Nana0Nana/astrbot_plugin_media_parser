@@ -1,8 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-媒体验证模块
-包含HTTP请求，验证媒体有效性
-"""
 import asyncio
 from typing import Optional, Tuple
 
@@ -70,72 +66,6 @@ async def validate_media_response(
         return False, None
     
     return True, None
-
-
-async def get_media_size_from_response(
-    session: aiohttp.ClientSession,
-    media_url: str,
-    headers: dict = None,
-    proxy: str = None,
-    is_video: bool = True
-) -> Optional[float]:
-    """获取媒体大小并验证是否为有效媒体（仅通过header判断）
-
-    Args:
-        session: aiohttp会话
-        media_url: 媒体URL
-        headers: 请求头（可选）
-        proxy: 代理地址（可选）
-        is_video: 是否为视频（True为视频，False为图片）
-
-    Returns:
-        媒体大小(MB)，如果无效或无法获取返回None
-    """
-    try:
-        request_headers = headers or {}
-        timeout = aiohttp.ClientTimeout(total=Config.VIDEO_SIZE_CHECK_TIMEOUT)
-        
-        try:
-            async with session.head(
-                media_url,
-                headers=request_headers,
-                timeout=timeout,
-                proxy=proxy,
-                allow_redirects=True
-            ) as response:
-                if response.status == 403:
-                    logger.warning(f"媒体URL访问被拒绝(403 Forbidden): {media_url}")
-                    response._access_denied = True
-                
-                is_valid, _ = await validate_media_response(
-                    response, media_url, is_video, allow_read_content=False
-                )
-                if not is_valid:
-                    return None
-                
-                return extract_size_from_headers(response)
-        except (aiohttp.ClientError, asyncio.TimeoutError):
-            async with session.get(
-                media_url,
-                headers=request_headers,
-                timeout=timeout,
-                proxy=proxy,
-                allow_redirects=True
-            ) as response:
-                if response.status == 403:
-                    logger.warning(f"媒体URL访问被拒绝(403 Forbidden): {media_url}")
-                    response._access_denied = True
-                
-                is_valid, _ = await validate_media_response(
-                    response, media_url, is_video, allow_read_content=True
-                )
-                if not is_valid:
-                    return None
-                
-                return extract_size_from_headers(response)
-    except Exception as e:
-        logger.warning(f"获取媒体大小失败: {media_url}, 错误: {e}")
-    return None
 
 
 async def get_video_size(
