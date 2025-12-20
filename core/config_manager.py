@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 from typing import List
 
 try:
@@ -9,7 +7,8 @@ except ImportError:
     logger = logging.getLogger(__name__)
 
 from .constants import Config
-from .parser.handler import (
+from .downloader.utils import check_cache_dir_available
+from .parser.platform import (
     BilibiliParser,
     DouyinParser,
     KuaishouParser,
@@ -29,7 +28,7 @@ class ConfigManager:
             config: 原始配置字典
 
         Raises:
-            ValueError: 当没有启用任何解析器时
+            ValueError: 没有启用任何解析器时
         """
         self._config = config
         self._parse_config()
@@ -69,8 +68,16 @@ class ConfigManager:
         )
         self.max_concurrent_downloads = download_settings.get(
             "max_concurrent_downloads",
-            3
+            Config.DOWNLOAD_MANAGER_MAX_CONCURRENT
         )
+        
+        if self.pre_download_all_media:
+            if not check_cache_dir_available(self.cache_dir):
+                logger.warning(
+                    f"预下载模式已启用，但缓存目录不可用: {self.cache_dir}，"
+                    f"将自动降级为禁用预下载模式"
+                )
+                self.pre_download_all_media = False
         
         parser_enable_settings = self._config.get("parser_enable_settings", {})
         self.enable_bilibili = parser_enable_settings.get("enable_bilibili", True)
@@ -117,7 +124,7 @@ class ConfigManager:
             解析器列表
 
         Raises:
-            ValueError: 当没有启用任何解析器时
+            ValueError: 没有启用任何解析器时
         """
         parsers = []
         

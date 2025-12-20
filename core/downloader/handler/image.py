@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import os
 import tempfile
 from typing import Optional
@@ -11,46 +10,49 @@ except ImportError:
     import logging
     logger = logging.getLogger(__name__)
 
-from ..utils import get_image_suffix
+from ..utils import generate_cache_file_path, get_image_suffix
 from .base import download_media_from_url
 
 
-async def download_image_to_file(
+async def download_image_to_cache(
     session: aiohttp.ClientSession,
     image_url: str,
+    cache_dir: str,
+    media_id: str,
     index: int = 0,
     headers: dict = None,
-    proxy: str = None,
-    cache_dir: Optional[str] = None,
-    media_id: Optional[str] = None
+    proxy: str = None
 ) -> Optional[str]:
-    """下载图片到文件
+    """下载图片到缓存目录或临时文件
 
     Args:
         session: aiohttp会话
         image_url: 图片URL
+        cache_dir: 缓存目录（如果提供则下载到缓存目录，否则下载到临时文件）
+        media_id: 媒体ID（用于生成缓存文件名）
         index: 图片索引
         headers: 请求头字典
         proxy: 代理地址（可选）
-        cache_dir: 缓存目录（可选，如果提供则下载到缓存目录，否则下载到临时文件）
-        media_id: 媒体ID（可选，用于生成缓存文件名）
 
     Returns:
-        文件路径，失败返回None
+        文件路径，失败时为None
     """
     if cache_dir and media_id:
-        def generate_cache_file_path(content_type: str, url: str) -> str:
+        def file_path_generator(content_type: str, url: str) -> str:
             """生成缓存文件路径"""
-            suffix = get_image_suffix(content_type, url)
-            cache_subdir = os.path.join(cache_dir, media_id)
-            os.makedirs(cache_subdir, exist_ok=True)
-            filename = f"image_{index}{suffix}"
-            return os.path.normpath(os.path.join(cache_subdir, filename))
+            return generate_cache_file_path(
+                cache_dir=cache_dir,
+                media_id=media_id,
+                media_type='image',
+                index=index,
+                content_type=content_type,
+                url=url
+            )
         
         file_path, _ = await download_media_from_url(
             session=session,
             media_url=image_url,
-            file_path_generator=generate_cache_file_path,
+            file_path_generator=file_path_generator,
             is_video=False,
             headers=headers,
             proxy=proxy

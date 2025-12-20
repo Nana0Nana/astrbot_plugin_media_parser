@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import asyncio
 from typing import Optional, Tuple
 
@@ -83,7 +82,7 @@ async def get_video_size(
         proxy: 代理地址（可选）
 
     Returns:
-        (size_mb, status_code) 元组，size_mb为视频大小(MB)，如果无法获取返回None，
+        (size_mb, status_code) 元组，size_mb为视频大小(MB)，无法获取时为None，
         status_code为HTTP状态码（如果是403等特殊状态码），否则为None
     """
     try:

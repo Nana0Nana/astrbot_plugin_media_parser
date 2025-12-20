@@ -1,12 +1,11 @@
-# -*- coding: utf-8 -*-
-
 import re
 from typing import Optional, Dict, Any, Literal
 
 import aiohttp
 
-from .handler.image import download_image_to_file
+from .handler.image import download_image_to_cache
 from .handler.normal_video import download_video_to_cache
+from .handler.range_video import download_video_to_cache as download_range_video_to_cache
 from .handler.m3u8 import M3U8Handler
 
 
@@ -87,9 +86,13 @@ async def download_media(
         use_ffmpeg: 是否使用ffmpeg（仅用于M3U8）
 
     Returns:
-        下载结果字典，包含file_path和size_mb字段，失败返回None
+        下载结果字典，包含file_path和size_mb字段，失败时为None
     """
-    if media_type is None:
+    actual_url = media_url
+    if media_url.startswith('m3u8:'):
+        actual_url = media_url[6:]
+        media_type = 'm3u8'
+    elif media_type is None:
         media_type = detect_media_type(media_url)
     
     if media_type == 'm3u8':
@@ -104,7 +107,7 @@ async def download_media(
             )
         
         return await m3u8_handler.download_m3u8_to_cache(
-            m3u8_url=media_url,
+            m3u8_url=actual_url,
             cache_dir=cache_dir,
             media_id=media_id or 'media',
             index=index,
@@ -112,14 +115,14 @@ async def download_media(
         )
     
     elif media_type == 'image':
-        file_path = await download_image_to_file(
+        file_path = await download_image_to_cache(
             session=session,
-            image_url=media_url,
+            image_url=actual_url,
+            cache_dir=cache_dir or '',
+            media_id=media_id or 'image',
             index=index,
             headers=headers,
-            proxy=proxy,
-            cache_dir=cache_dir,
-            media_id=media_id
+            proxy=proxy
         )
         if file_path:
             return {'file_path': file_path, 'size_mb': None}
@@ -129,12 +132,29 @@ async def download_media(
         if not cache_dir:
             return None
         
-        return await download_video_to_cache(
-            session=session,
-            video_url=media_url,
-            cache_dir=cache_dir,
-            media_id=media_id or 'media',
-            index=index,
-            headers=headers,
-            proxy=proxy
-        )
+        use_range_download = False
+        
+        if actual_url.startswith('range:'):
+            actual_url = actual_url[6:]
+            use_range_download = True
+        
+        if use_range_download:
+            return await download_range_video_to_cache(
+                session=session,
+                video_url=actual_url,
+                cache_dir=cache_dir,
+                media_id=media_id or 'media',
+                index=index,
+                headers=headers,
+                proxy=proxy
+            )
+        else:
+            return await download_video_to_cache(
+                session=session,
+                video_url=actual_url,
+                cache_dir=cache_dir,
+                media_id=media_id or 'media',
+                index=index,
+                headers=headers,
+                proxy=proxy
+            )

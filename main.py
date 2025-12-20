@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import asyncio
 import json
 from typing import Any, Dict
@@ -28,7 +26,7 @@ from .core.config_manager import ConfigManager
     "astrbot_plugin_media_parser",
     "drdon1234",
     "聚合解析流媒体平台链接，转换为媒体直链发送",
-    "4.0.0"
+    "4.1.0"
 )
 class VideoParserPlugin(Star):
 
@@ -40,7 +38,7 @@ class VideoParserPlugin(Star):
             config: 配置字典
 
         Raises:
-            ValueError: 当没有启用任何解析器时
+            ValueError: 没有启用任何解析器时
         """
         super().__init__(context)
         self.logger = logger
@@ -83,7 +81,7 @@ class VideoParserPlugin(Star):
             message_str: 消息文本
 
         Returns:
-            如果应该解析返回True，否则返回False
+            是否应该解析
         """
         if self.is_auto_parse:
             return True
@@ -161,8 +159,7 @@ class VideoParserPlugin(Star):
                         f"元数据[{idx}]: url={metadata.get('url')}, "
                         f"video_count={len(metadata.get('video_urls', []))}, "
                         f"image_count={len(metadata.get('image_urls', []))}, "
-                        f"image_pre_download={metadata.get('image_pre_download')}, "
-                        f"video_pre_download={metadata.get('video_pre_download')}"
+                        f"video_force_download={metadata.get('video_force_download')}"
                     )
             
             async def process_single_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
@@ -172,7 +169,7 @@ class VideoParserPlugin(Star):
                     metadata: 元数据字典
 
                 Returns:
-                    处理后的元数据字典（始终返回字典，异常时包含error字段）
+                    处理后的元数据字典，异常时包含error字段
                 """
                 if metadata.get('error'):
                     return metadata
@@ -195,8 +192,6 @@ class VideoParserPlugin(Star):
             processed_metadata_list = []
             for i, result in enumerate(results):
                 if isinstance(result, Exception):
-                    # 这种情况理论上不应该发生，因为process_single_metadata内部已经捕获了所有异常
-                    # 但为了防御性编程，仍然处理这种情况
                     metadata = metadata_list[i] if i < len(metadata_list) else {}
                     error_msg = str(result)
                     self.logger.exception(
@@ -208,7 +203,6 @@ class VideoParserPlugin(Star):
                 elif isinstance(result, dict):
                     processed_metadata_list.append(result)
                 else:
-                    # 处理意外的返回类型
                     metadata = metadata_list[i] if i < len(metadata_list) else {}
                     error_msg = f'未知错误类型: {type(result).__name__}'
                     self.logger.warning(
