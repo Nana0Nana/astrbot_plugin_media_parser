@@ -1,3 +1,4 @@
+import asyncio
 import os
 import tempfile
 from typing import Optional
@@ -12,6 +13,72 @@ except ImportError:
 
 from ..utils import generate_cache_file_path, get_image_suffix
 from .base import download_media_from_url
+
+
+def _is_supported_image_format(file_path: str) -> bool:
+    """检查图片格式是否为支持的格式（jpg, jpeg, png）
+    
+    Args:
+        file_path: 图片文件路径
+        
+    Returns:
+        是否为支持的格式
+    """
+    if not file_path or not os.path.exists(file_path):
+        return False
+    
+    ext = os.path.splitext(file_path)[1].lower()
+    return ext in ['.jpg', '.jpeg', '.png']
+
+
+async def _convert_image_to_png(input_path: str, output_path: str) -> bool:
+    """使用 ffmpeg 将图片转换为 PNG 格式（异步版本）
+    
+    Args:
+        input_path: 输入图片路径
+        output_path: 输出 PNG 路径
+        
+    Returns:
+        转换是否成功
+    """
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y", "-i", input_path,
+            output_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
+        
+        if process.returncode == 0:
+            logger.debug(f"图片已转换为 PNG: {output_path}")
+            return True
+        else:
+            process = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-y", "-i", input_path,
+                "-c:v", "png",
+                output_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
+            
+            if process.returncode == 0:
+                logger.debug(f"图片已转换为 PNG: {output_path}")
+                return True
+            else:
+                logger.warning(f"ffmpeg 转换图片失败: {input_path}")
+                return False
+                
+    except asyncio.TimeoutError:
+        logger.warning(f"ffmpeg 转换超时: {input_path}")
+        return False
+    except FileNotFoundError:
+        logger.warning("ffmpeg 未找到，无法转换图片格式")
+        return False
+    except Exception as e:
+        logger.warning(f"ffmpeg 转换图片异常: {input_path}, 错误: {e}")
+        return False
 
 
 async def download_image_to_cache(
@@ -75,6 +142,20 @@ async def download_image_to_cache(
             headers=headers,
             proxy=proxy
         )
+    
+    if file_path and not _is_supported_image_format(file_path):
+        base_path = os.path.splitext(file_path)[0]
+        png_path = f"{base_path}.png"
+        
+        if await _convert_image_to_png(file_path, png_path):
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception as e:
+                logger.warning(f"删除原图片文件失败: {e}")
+            return png_path
+        else:
+            logger.warning(f"图片格式转换失败，保留原文件: {file_path}")
     
     return file_path
 

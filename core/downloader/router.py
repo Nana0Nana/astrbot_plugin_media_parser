@@ -90,7 +90,7 @@ async def download_media(
     """
     actual_url = media_url
     if media_url.startswith('m3u8:'):
-        actual_url = media_url[6:]
+        actual_url = media_url[5:]
         media_type = 'm3u8'
     elif media_type is None:
         media_type = detect_media_type(media_url)

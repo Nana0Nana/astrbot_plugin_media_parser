@@ -171,9 +171,9 @@ def build_media_nodes(
         else:
             actual_video_url = video_url
             if video_url.startswith('range:'):
-                actual_video_url = video_url[6:]  # 去除 "range:" 前缀
+                actual_video_url = video_url[6:]
             elif video_url.startswith('m3u8:'):
-                actual_video_url = video_url[6:]  # 去除 "m3u8:" 前缀
+                actual_video_url = video_url[5:]
             
             try:
                 nodes.append(Video.fromURL(actual_video_url))

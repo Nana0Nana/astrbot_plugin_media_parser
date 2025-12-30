@@ -410,7 +410,7 @@ async def main(
 if __name__ == "__main__":
     DEBUG_MODE = False
     
-    USE_PROXY = True
+    USE_PROXY = False
     PROXY_URL = "http://127.0.0.1:7897"
     
     CACHE_DIR = os.path.join(os.path.dirname(__file__), "media")
