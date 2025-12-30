@@ -59,9 +59,14 @@ astrbot_plugin_media_parser/
 - **ConfigManager**: 配置管理器
   - 解析配置文件
   - 管理解析器启用状态
-  - 管理下载配置（缓存目录、预下载模式等）
+  - 管理下载配置（缓存目录、预下载模式、最大并发下载数等）
   - 管理代理配置
-  - 创建解析器实例列表
+    - 全局代理地址（proxy_addr）
+    - Twitter分项代理（解析、图片、视频）
+    - 小黑盒视频代理
+  - 管理触发设置（自动解析、关键词触发）
+  - 管理视频大小限制设置
+  - 创建解析器实例列表（根据启用状态和代理配置）
 
 #### 1.3.3 解析器模块 (parser/)
 - **ParserManager**: 解析器管理器
@@ -87,23 +92,31 @@ astrbot_plugin_media_parser/
 - **DownloadManager**: 下载管理器
   - 管理媒体下载流程
   - 处理视频大小验证
-  - 管理并发下载
+  - 管理并发下载（使用Semaphore控制）
   - 决定使用直链还是本地文件
+  - 管理活动会话和任务（用于shutdown时清理）
+  - 处理代理配置（从元数据中读取平台特定的代理设置）
 
 - **Router**: 媒体下载路由
   - 检测媒体类型（图片/视频/M3U8）
   - 路由到对应的下载处理器
 
 - **下载处理器** (handler/)
+  - **Base Handler**: 基础下载器（提供通用下载逻辑）
+    - 流式下载（视频）和完整下载（图片）
+    - 媒体响应验证
+    - 文件大小提取
   - **Image Handler**: 图片下载器
   - **Normal Video Handler**: 普通视频下载器（完整下载）
-  - **Range Video Handler**: 分片视频下载器（支持Range请求）
+  - **Range Video Handler**: 分片视频下载器（支持Range请求，并发下载）
   - **M3U8 Handler**: M3U8流媒体下载器（支持FFmpeg转换）
 
 - **Validator**: 媒体验证器
   - 验证媒体URL可访问性
   - 获取媒体大小信息
-  - 检测访问权限问题
+  - 检测访问权限问题（403 Forbidden）
+  - 验证响应Content-Type
+  - 处理HEAD请求失败时的GET回退
 
 #### 1.3.5 消息适配器模块 (message_adapter/)
 - **MessageManager**: 消息管理器
@@ -136,7 +149,18 @@ astrbot_plugin_media_parser/
   - 支持输入链接并解析
   - 支持用户确认后下载媒体
   - 显示解析和下载统计信息
+  - 支持代理配置和调试模式
   - 用于本地开发和调试
+
+#### 1.3.8 资源管理
+- **DownloadManager.shutdown()**: 资源清理方法
+  - 关闭所有活动的aiohttp会话
+  - 取消所有正在进行的下载任务
+  - 在插件terminate时调用
+- **FileCleaner**: 文件清理工具
+  - 清理临时文件（图片）
+  - 清理视频文件
+  - 清理缓存目录
 
 ## 二、程序执行链
 
@@ -237,11 +261,17 @@ parser::manager::ParserManager.parse_text()
   ├─ url: 原始链接
   ├─ title: 标题
   ├─ author: 作者
-  ├─ video_urls: 视频URL列表（二维列表）
+  ├─ desc: 描述（可选）
+  ├─ timestamp: 发布时间（可选，格式：Y-M-D）
+  ├─ platform: 平台标识（解析器名称）
+  ├─ video_urls: 视频URL列表（二维列表，可能包含range:或m3u8:前缀）
   ├─ image_urls: 图片URL列表（二维列表）
   ├─ video_headers: 视频请求头
   ├─ image_headers: 图片请求头
-  └─ video_force_download: 是否强制下载
+  ├─ video_force_download: 是否强制下载
+  ├─ use_image_proxy: 图片是否使用代理（Twitter等平台）
+  ├─ use_video_proxy: 视频是否使用代理（Twitter、小黑盒等平台）
+  └─ proxy_url: 代理地址（可选，平台特定）
 ```
 
 #### 2.2.4 元数据处理阶段
@@ -257,25 +287,29 @@ downloader::manager::DownloadManager.process_metadata()
   │       └─ 如果超过限制 → 返回错误元数据
   │
   ├─ 预下载模式 (effective_pre_download = True)
-  │   ├─ 构建媒体项列表
-  │   ├─ 批量下载所有媒体
+  │   ├─ 说明：effective_pre_download = pre_download_all_media && 缓存目录可用
+  │   ├─ 构建媒体项列表（包含代理配置信息）
+  │   ├─ 批量下载所有媒体（并发控制）
   │   │   └─ downloader::router::download_media()
-  │   │       ├─ 检测媒体类型
+  │   │       ├─ 检测媒体类型（通过URL特征或前缀）
   │   │       └─ 路由到对应下载器
-  │   │           ├─ image → handler::image
-  │   │           ├─ video → handler::normal_video
-  │   │           ├─ range: → handler::range_video
-  │   │           └─ m3u8: → handler::m3u8
-  │   ├─ 处理下载结果
-  │   └─ 更新元数据（file_paths, video_sizes等）
+  │   │           ├─ image → handler::image（支持代理）
+  │   │           ├─ video → handler::normal_video（支持代理）
+  │   │           ├─ range:前缀 → handler::range_video（并发Range请求，支持代理）
+  │   │           └─ m3u8:前缀或.m3u8扩展名 → handler::m3u8（FFmpeg转换，支持代理）
+  │   ├─ 处理下载结果（统计成功/失败数量）
+  │   ├─ 处理video_force_download标志（全部失败时跳过视频）
+  │   └─ 更新元数据（file_paths, video_sizes, has_valid_media等）
   │
   └─ 直链模式 (effective_pre_download = False)
       ├─ 处理 video_force_download 标志
       │   └─ 如果为True且未启用预下载 → 跳过视频
       ├─ 检查视频可访问性
-      │   └─ validator::get_video_size()
+      │   └─ validator::get_video_size()（并发检查所有视频）
+      │       └─ 检测403访问被拒绝
       └─ 下载图片到临时目录
           └─ downloader::manager::DownloadManager._download_images()
+              └─ 并发下载所有图片（支持代理配置）
   ↓
 返回处理后的元数据
 ```
@@ -299,10 +333,10 @@ message_adapter::node_builder::build_all_nodes()
   │       │
   │       └─ 构建媒体节点
   │           └─ message_adapter::node_builder::build_media_nodes()
-  │               ├─ 判断是否使用本地文件
+  │               ├─ 判断是否使用本地文件（use_local_files）
   │               ├─ 构建视频节点
   │               │   ├─ 本地文件 → Video.fromFileSystem()
-  │               │   └─ 直链 → Video.fromURL()
+  │               │   └─ 直链 → Video.fromURL()（去除range:或m3u8:前缀）
   │               └─ 构建图片节点
   │                   ├─ 本地文件 → Image.fromFileSystem()
   │                   └─ 直链 → Image.fromURL()
@@ -354,6 +388,29 @@ file_cleaner::cleanup_files()
   └─ 清理视频文件
   ↓
 清理完成
+
+注意：
+- 打包模式下，普通媒体的视频文件在发送后立即清理
+- 大媒体单独发送，每个链接发送后立即清理其视频文件
+- 非打包模式下，每个链接发送后立即清理其视频文件
+- 所有临时文件（图片）在finally块中统一清理
+```
+
+#### 2.2.8 插件终止阶段
+
+```
+main.py::VideoParserPlugin.terminate()
+  ↓
+downloader::manager::DownloadManager.shutdown()
+  ├─ 设置 _shutting_down 标志
+  ├─ 关闭所有活动的 aiohttp 会话
+  ├─ 取消所有正在进行的下载任务
+  └─ 清理任务列表
+  ↓
+file_cleaner::cleanup_directory()
+  └─ 清理缓存目录
+  ↓
+终止完成
 ```
 
 ### 2.3 异常处理链
@@ -385,10 +442,20 @@ file_cleaner::cleanup_files()
   ├─ asyncio.gather() 并发处理所有元数据
   └─ 每个元数据独立处理
   ↓
+视频大小检查并发
+  ├─ asyncio.gather() 并发检查所有视频大小
+  └─ 每个视频独立检查，检测403状态码
+  ↓
 媒体下载并发
-  ├─ Semaphore 控制最大并发数
+  ├─ Semaphore 控制最大并发数（max_concurrent_downloads）
   ├─ 批量下载时并发下载所有媒体项
+  ├─ Range视频下载：内部使用Semaphore控制Range请求并发数
+  ├─ M3U8视频下载：内部使用Semaphore控制分片下载并发数
   └─ 单个媒体失败不影响其他媒体
+  ↓
+图片下载并发（直链模式）
+  ├─ asyncio.gather() 并发下载所有图片
+  └─ 每个图片独立下载，支持代理配置
 ```
 
 ## 三、关键设计模式
@@ -428,12 +495,18 @@ file_cleaner::cleanup_files()
   └─ video_force_download
   ↓
 下载处理 → 增强元数据
-  ├─ file_paths: List[str]
-  ├─ video_sizes: List[float]
-  ├─ max_video_size_mb
-  ├─ has_valid_media
-  ├─ use_local_files
-  └─ failed_video_count, failed_image_count
+  ├─ file_paths: List[str]（本地文件路径列表）
+  ├─ video_sizes: List[Optional[float]]（视频大小列表，MB）
+  ├─ max_video_size_mb: Optional[float]（最大视频大小）
+  ├─ total_video_size_mb: float（总视频大小）
+  ├─ video_count: int（视频数量）
+  ├─ image_count: int（图片数量）
+  ├─ has_valid_media: bool（是否有有效媒体）
+  ├─ use_local_files: bool（是否使用本地文件）
+  ├─ exceeds_max_size: bool（是否超过大小限制）
+  ├─ has_access_denied: bool（是否有403访问被拒绝）
+  ├─ failed_video_count: int（失败的视频数量）
+  └─ failed_image_count: int（失败的图片数量）
   ↓
 节点构建 → 节点列表
   ├─ Plain 节点（文本信息）
@@ -446,19 +519,47 @@ file_cleaner::cleanup_files()
 ### 4.2 文件流转
 
 ```
-媒体URL
+媒体URL（可能包含range:或m3u8:前缀）
   ↓
 下载处理
   ├─ 预下载模式 → 缓存目录
-  │   └─ {platform}_{hash}_{timestamp}/media_{index}.{ext}
+  │   └─ {platform}_{url_hash}_{timestamp}/media_{index}.{ext}
+  │       ├─ 视频：支持Range并发下载、M3U8分片下载+FFmpeg合并
+  │       └─ 图片：完整下载
   └─ 直链模式（仅图片）→ 临时目录
       └─ temp_image_{index}.{ext}
   ↓
 节点构建
-  ├─ 本地文件 → fromFileSystem()
-  └─ 直链 → fromURL()
+  ├─ 本地文件 → fromFileSystem()（去除URL前缀）
+  └─ 直链 → fromURL()（去除range:或m3u8:前缀）
   ↓
 消息发送
+  ├─ 打包模式：普通媒体发送后清理视频文件
+  ├─ 非打包模式：每个链接发送后清理视频文件
+  └─ 所有临时文件在finally块中统一清理
   ↓
-文件清理 → 删除临时文件
+文件清理 → 删除临时文件和视频文件
+```
+
+### 4.3 代理流转
+
+```
+配置中的代理设置
+  ├─ proxy_addr: 全局代理地址
+  ├─ twitter.parse: Twitter解析是否使用代理
+  ├─ twitter.image: Twitter图片是否使用代理
+  ├─ twitter.video: Twitter视频是否使用代理
+  └─ xiaoheihe.video: 小黑盒视频是否使用代理
+  ↓
+解析器初始化
+  ├─ TwitterParser: 接收代理配置参数
+  └─ XiaoheiheParser: 接收代理配置参数
+  ↓
+解析阶段
+  └─ 元数据中包含 use_image_proxy, use_video_proxy, proxy_url
+  ↓
+下载阶段
+  ├─ 从元数据读取代理配置
+  ├─ 优先级：元数据中的proxy_url > 全局proxy_addr
+  └─ 根据use_image_proxy和use_video_proxy决定是否使用代理
 ```
