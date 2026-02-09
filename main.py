@@ -192,9 +192,7 @@ class VideoParserPlugin(Star):
                 if self.debug_mode:
                     self.logger.debug("解析后未获得任何有效元数据（可能是直播链接或解析失败）")
                 return
-            
-            await event.send(event.plain_result("流媒体解析bot为您服务 ٩( 'ω' )و"))
-            
+                        
             if self.debug_mode:
                 self.logger.debug(f"解析获得 {len(metadata_list)} 条元数据")
                 for idx, metadata in enumerate(metadata_list):

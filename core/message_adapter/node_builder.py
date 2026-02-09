@@ -90,8 +90,7 @@ def build_text_node(metadata: Dict[str, Any], max_video_size_mb: float = 0.0) ->
         if failure_parts:
             text_parts.append(f"下载失败：{', '.join(failure_parts)}")
     
-    if metadata.get('url'):
-        text_parts.append(f"原始链接：{metadata['url']}")
+
     
     if not text_parts:
         return None

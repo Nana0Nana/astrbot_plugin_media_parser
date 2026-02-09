@@ -50,9 +50,7 @@ def print_metadata(metadata: Dict[str, Any], url: str, parser_name: str):
         return
     
     print(f"标题: {metadata.get('title', 'N/A')}")
-    print(f"作者: {metadata.get('author', 'N/A')}")
     print(f"简介: {metadata.get('desc', 'N/A')}")
-    print(f"发布时间: {metadata.get('timestamp', 'N/A')}")
     
     video_urls = metadata.get('video_urls', [])
     image_urls = metadata.get('image_urls', [])
